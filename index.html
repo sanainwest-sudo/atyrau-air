@@ -86,7 +86,8 @@
         <h2 style="margin:0">🔎 Көзді анықтау</h2>
         <select id="attrWindow">
           <option value="1">таңдалған сағат</option>
-          <option value="6" selected>соңғы 6 сағат</option>
+          <option value="3" selected>соңғы 3 сағат</option>
+          <option value="6">соңғы 6 сағат</option>
           <option value="12">соңғы 12 сағат</option>
         </select>
       </div>
@@ -97,6 +98,14 @@
       <div id="roseBox" hidden style="margin-top:6px">
         <svg id="rose" viewBox="-100 -100 200 200" width="200" height="200" style="display:block;margin:0 auto"></svg>
         <div class="muted" id="roseNote"></div>
+        <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          Сызық ұзындығы <input type="range" id="lineKm" min="3" max="20" step="1" value="12" style="flex:1"> <b id="lineKmVal">12 км</b>
+        </label>
+        <div style="margin-top:8px">
+          <b style="font-size:14px">📍 Шағым нүктелері</b>
+          <div class="muted">Картаны басыңыз — иіс сезілген жер. Таңдалған кезеңнің әр сағатына сол жерден жел келген жаққа сызық (күлгін).</div>
+          <div id="complaints"></div>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -228,7 +237,7 @@ function render() {
     if (!series) continue;
     const v = series[h];
     if (v != null) list.push({ s, v });
-    L.circleMarker([s.lat, s.lng], { radius: v == null ? 6 : 9 + Math.min(12, lim ? v / lim * 4 : 0), color: '#fff', weight: 2,
+    L.circleMarker([s.lat, s.lng], { bubblingMouseEvents: false, radius: v == null ? 6 : 9 + Math.min(12, lim ? v / lim * 4 : 0), color: '#fff', weight: 2,
         fillColor: colorFor(v), fillOpacity: v == null ? .5 : .9 })
       .bindTooltip(v == null ? esc(s.name) : String(v), { permanent: v != null, direction: 'center', className: 'station-label' })
       .bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.address)}<br>${pollutant}: <b>${v ?? 'дерек жоқ'}</b> мкг/м³` + (lim && v != null ? ` (${(v / lim).toFixed(1)} × шекті мән)` : ''))
@@ -335,7 +344,14 @@ $('#attrWindow').onchange = renderAttribution;
 
 /* ===== Жел розасы + талдау сызықтары (бекеттен желге қарсы) ===== */
 const roseLayer = L.layerGroup().addTo(map);
-const LINE_KM = 12;           // сызық ұзындығы
+let LINE_KM = 12;             // сызық ұзындығы, км (жылжытқышпен өзгереді)
+try { LINE_KM = +localStorage.getItem('atyrau-air-linekm') || 12; } catch {}
+$('#lineKm').value = LINE_KM; $('#lineKmVal').textContent = LINE_KM + ' км';
+$('#lineKm').oninput = e => {
+  LINE_KM = +e.target.value; $('#lineKmVal').textContent = LINE_KM + ' км';
+  try { localStorage.setItem('atyrau-air-linekm', LINE_KM); } catch {}
+  renderAttribution();
+};
 const ROSE_DIRS = ['С', 'СШ', 'Ш', 'ОШ', 'О', 'ОБ', 'Б', 'СБ']; // солтүстік, шығыс, оңтүстік, батыс
 try { $('#roseChk').checked = localStorage.getItem('atyrau-air-rose') === '1'; } catch {}
 $('#roseChk').onchange = () => { try { localStorage.setItem('atyrau-air-rose', $('#roseChk').checked ? '1' : '0'); } catch {} renderAttribution(); };
@@ -374,6 +390,7 @@ function renderRose(win, obs, weather, maxEx) {
   $('#roseNote').innerHTML = `Кезең: ${nHours} сағат. Сұр — жел қай жақтан қаншалықты жиі соқты; қоңыр — ${pollutant} артықшылығын қай жақтан соққан жел әкелді.` +
     (Math.max(...pol) > 0 ? ` Көбі — <b>${['солтүстік', 'солтүстік-солтүстік-шығыс', 'солтүстік-шығыс', 'шығыс-солтүстік-шығыс', 'шығыс', 'шығыс-оңтүстік-шығыс', 'оңтүстік-шығыс', 'оңтүстік-оңтүстік-шығыс', 'оңтүстік', 'оңтүстік-оңтүстік-батыс', 'оңтүстік-батыс', 'батыс-оңтүстік-батыс', 'батыс', 'батыс-солтүстік-батыс', 'солтүстік-батыс', 'солтүстік-солтүстік-батыс'][topK]}</b> жақтан.` : ' Бұл кезеңде артықшылық жоқ.') +
     `<br>Картада: артықшылық болған бекеттен жел келген жаққа ${LINE_KM} км сызық (сағатына біреу), қалыңдығы — артықшылыққа сай. Сызықтар тоғысқан жер — ықтимал көз.`;
+  renderComplaints(win, weather);
   // 2) картадағы талдау сызықтары
   if (maxEx <= 0) return;
   for (const o of obs) {
@@ -384,6 +401,60 @@ function renderRose(win, obs, weather, maxEx) {
       { color: '#b45309', weight: 1 + 5 * t, opacity: 0.25 + 0.6 * t, interactive: false }).addTo(roseLayer);
   }
 }
+
+/* ===== Шағым нүктелері: иіс сезілген жер → жел келген жаққа сызық → жанынан өтетін көздер ===== */
+const CMP_KEY = 'atyrau-air-complaints-v1';
+const NEAR_KM = 1.5; // сызық көзден осыдан жақын өтсе — «үстінен өтеді»
+let complaints = [];
+try { complaints = JSON.parse(localStorage.getItem(CMP_KEY)) || []; } catch {}
+const saveComplaints = () => { try { localStorage.setItem(CMP_KEY, JSON.stringify(complaints)); } catch {} };
+
+// нүктеден AB кесіндісіне дейінгі қашықтық, км (жергілікті жазық проекция)
+function distToSegmentKm(p, a, b) {
+  const kx = 111.32 * Math.cos(p[0] * Math.PI / 180), ky = 110.54;
+  const ax = (a[1] - p[1]) * kx, ay = (a[0] - p[0]) * ky, bx = (b[1] - p[1]) * kx, by = (b[0] - p[0]) * ky;
+  const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+  return Math.hypot(ax + t * dx, ay + t * dy);
+}
+// көздің нүктелері: тоған болса — оның торындағы барлық нүкте
+const sourcePoints = s => Array.isArray(s.area) && s.area.length ? AirModel.areaPoints(s.area) : [[s.lat, s.lng]];
+
+function renderComplaints(win, weather) {
+  const hoursW = win.filter(h => weather[h]);
+  $('#complaints').innerHTML = complaints.map((c, i) => {
+    L.marker([c.lat, c.lng], { icon: L.divIcon({ className: 'src-icon', html: '📍', iconSize: [24, 24], iconAnchor: [12, 22] }), bubblingMouseEvents: false })
+      .bindTooltip(`Шағым нүктесі ${i + 1}`).addTo(roseLayer);
+    const hits = {};
+    for (const h of hoursW) {
+      const end = upwindPoint(c, weather[h].dir, LINE_KM);
+      L.polyline([[c.lat, c.lng], end], { color: '#7c3aed', weight: 3, opacity: 0.7, dashArray: '6 4', interactive: false }).addTo(roseLayer);
+      for (const s of sources) {
+        if (s.lat == null) continue;
+        const d = Math.min(...sourcePoints(s).map(pt => distToSegmentKm(pt, [c.lat, c.lng], end)));
+        const r = hits[s.id] ??= { s, n: 0, min: Infinity };
+        r.min = Math.min(r.min, d);
+        if (d <= NEAR_KM) r.n++;
+      }
+    }
+    const list = Object.values(hits).filter(r => r.min <= 3).sort((a, b) => b.n - a.n || a.min - b.min);
+    return `<div class="src-item">📍 <b>Нүкте ${i + 1}</b> <span class="meta">${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}</span>
+      <button data-cdel="${i}" style="float:right;padding:2px 8px">✕</button>
+      <div class="meta">${!hoursW.length ? 'Бұл кезеңде жел дерегі жоқ.' : list.length
+        ? list.map(r => r.n ? `${KIND_ICON[r.s.kind] || '📍'} ${esc(r.s.name)} — сызық үстінен өтеді (${r.n} сағ. / ${hoursW.length})`
+                            : `${KIND_ICON[r.s.kind] || '📍'} ${esc(r.s.name)} — ${r.min.toFixed(1)} км жерден өтеді`).join('<br>')
+        : `Сызықтар тізімдегі көздердің ешқайсысына 3 км-ден жақын өтпейді.`}</div></div>`;
+  }).join('') + (complaints.length ? `<button id="cClear" style="margin-top:6px">Барлық нүктені өшіру</button>` : '');
+}
+$('#complaints').addEventListener('click', e => {
+  if (e.target.dataset.cdel != null) { complaints.splice(+e.target.dataset.cdel, 1); saveComplaints(); renderAttribution(); }
+  if (e.target.id === 'cClear') { complaints = []; saveComplaints(); renderAttribution(); }
+});
+map.on('click', e => {
+  if (!$('#roseChk').checked || editing) return; // көздерді түзету кезінде басу — көзді қою үшін
+  complaints.push({ lat: +e.latlng.lat.toFixed(5), lng: +e.latlng.lng.toFixed(5) });
+  saveComplaints(); renderAttribution();
+});
 
 /* ===== Ықтимал көздер: sources.json + осы құрылғыдағы түзетулер ===== */
 const SRC_KEY = 'atyrau-air-sources-v1';
