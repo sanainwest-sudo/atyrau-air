@@ -200,13 +200,20 @@ function ownerOf(name) {
 }
 /* «Тұрып қалған» мән: бір сан STALE_RUN және одан көп сағат қатарынан өзгермесе (және ≥ STALE_MIN) — нақты өлшем емес деп санаймыз.
    Себебі: ecodata картасы ескі мәнді де көрсете береді; AirKz қосымшасы мұндай мәнді көрсетпейді (Мирный H2S/SO2, 14.10 22:00). */
-const STALE_RUN = 6, STALE_MIN = 3;
+const STALE_RUN = 6, STALE_MIN = 3, ALIVE_HOURS = 12;
+// Романның ережесі: өлшемде қозғалыс болса — алып тастамаймыз. Тегіс кесінді тек оның алдындағы және кейінгі
+// ALIVE_HOURS сағат ішінде мән бірде-бір рет өзгермесе ғана «тұрып қалған» деп саналады.
+const hourMs = h => Date.parse(h.replace(' ', 'T') + ':00:00Z');
 function markStale(series) {
   const hs = Object.keys(series).sort(), stale = new Set();
   for (let i = 0; i < hs.length;) {
     let j = i;
     while (j + 1 < hs.length && series[hs[j + 1]] === series[hs[i]]) j++;
-    if (j - i + 1 >= STALE_RUN && series[hs[i]] >= STALE_MIN) for (let k = i; k <= j; k++) stale.add(hs[k]);
+    if (j - i + 1 >= STALE_RUN && series[hs[i]] >= STALE_MIN) {
+      const t0 = hourMs(hs[i]) - ALIVE_HOURS * 36e5, t1 = hourMs(hs[j]) + ALIVE_HOURS * 36e5;
+      const alive = hs.some(h => { const t = hourMs(h); return t >= t0 && t <= t1 && series[h] !== series[hs[i]]; });
+      if (!alive) for (let k = i; k <= j; k++) stale.add(hs[k]);
+    }
     i = j + 1;
   }
   return stale;
@@ -267,7 +274,7 @@ function render() {
         dashArray: stuck ? '3 2' : null, fillColor: colorFor(v), fillOpacity: v == null ? .5 : .9 })
       .bindTooltip(stuck ? `⚠${raw}` : v == null ? esc(s.name) : String(v), { permanent: raw != null, direction: 'center', className: 'station-label' })
       .bindPopup(`<b>${esc(s.name)}</b>${s.owner ? ` · ${s.owner}` : ''}<br>${esc(s.address)}<br>${pollutant}: <b>${raw ?? 'дерек жоқ'}</b> мкг/м³` +
-        (stuck ? `<br>⚠ Бұл мән ${STALE_RUN}+ сағат бойы өзгермеген — датчик тұрып қалған немесе ескі мән. Талдауға кірмейді.`
+        (stuck ? `<br>⚠ Бұл мән ${STALE_RUN}+ сағат бойы өзгермеген және ±${ALIVE_HOURS} сағатта бірде-бір рет қозғалмаған — датчик тұрып қалған немесе ескі мән. Талдауға кірмейді.`
                : lim && v != null ? ` (${(v / lim).toFixed(1)} × шекті мән)` : ''))
       .on('click', () => { selected = s; renderChart(); })
       .addTo(layer);
