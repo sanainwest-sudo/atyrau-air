@@ -92,6 +92,7 @@
         </select>
       </div>
       <div id="attr" style="margin-top:8px"></div>
+      <div id="chronic" style="margin-top:8px"></div>
       <label class="muted" style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer">
         <input type="checkbox" id="roseChk"> 🧭 Жел розасы және талдау сызықтары
       </label>
@@ -189,6 +190,30 @@ function colorFor(v) {
   return LEVELS.find(l => v / lim <= l.max).color;
 }
 
+/* Бекет иесі (AirKz қосымшасындағы атаулар бойынша, Романның скриншоты 14.10.2026) */
+function ownerOf(name) {
+  if (/^СМКВ/.test(name)) return 'NCOC';
+  if (/^(Перетаска|Мирный|Mирный|Пропарка|Химпоселок)/.test(name)) return 'АМӨЗ (АНПЗ)';
+  if (/^ТШО/.test(name)) return 'ТШО';
+  if (/^ПНЗ/.test(name)) return 'Қазгидромет';
+  return '';
+}
+/* «Тұрып қалған» мән: бір сан STALE_RUN және одан көп сағат қатарынан өзгермесе (және ≥ STALE_MIN) — нақты өлшем емес деп санаймыз.
+   Себебі: ecodata картасы ескі мәнді де көрсете береді; AirKz қосымшасы мұндай мәнді көрсетпейді (Мирный H2S/SO2, 14.10 22:00). */
+const STALE_RUN = 6, STALE_MIN = 3;
+function markStale(series) {
+  const hs = Object.keys(series).sort(), stale = new Set();
+  for (let i = 0; i < hs.length;) {
+    let j = i;
+    while (j + 1 < hs.length && series[hs[j + 1]] === series[hs[i]]) j++;
+    if (j - i + 1 >= STALE_RUN && series[hs[i]] >= STALE_MIN) for (let k = i; k <= j; k++) stale.add(hs[k]);
+    i = j + 1;
+  }
+  return stale;
+}
+// таза мән (тұрып қалған мән болса — null)
+const val = (s, p, h) => { const v = s.data[p]?.[h]; return v == null || s.stale[p]?.has(h) ? null : v; };
+
 async function init() {
   const [rows, windRows] = await Promise.all([loadCsv('data/stations.csv'), loadCsv('data/wind.csv')]);
   // только почасовые замеры; ручные посты (одна дата в сутки) в почасовой шкале не участвуют
@@ -198,11 +223,12 @@ async function init() {
     // істен шыққан бекеттер: замер алынған уақыттан 2 тәуліктен ескі болса — өткізіп жібереміз
     if (new Date(r.fetched_at_utc) - new Date(r.measured_at.replace(' ', 'T') + '+05:00') > 2 * 864e5) continue;
     const key = r.station + '|' + r.lat + '|' + r.lng;
-    const st = stations[key] ??= { name: r.station, address: r.address, lat: +r.lat, lng: +r.lng, data: {} };
+    const st = stations[key] ??= { name: r.station, owner: ownerOf(r.station), address: r.address, lat: +r.lat, lng: +r.lng, data: {}, stale: {} };
     const h = r.measured_at.slice(0, 13);
     (st.data[r.pollutant] ??= {})[h] = +r.value;
     hourSet.add(h);
   }
+  for (const st of Object.values(stations)) for (const p in st.data) st.stale[p] = markStale(st.data[p]);
   for (const w of windRows) wind[w.time_local.replace('T', ' ').slice(0, 13)] = w;
   // шкала — барлық сағаттар қатарынан, бос сағаттар да
   const sorted = [...hourSet].sort();
@@ -235,17 +261,19 @@ function render() {
   for (const s of Object.values(stations)) {
     const series = s.data[pollutant];
     if (!series) continue;
-    const v = series[h];
+    const raw = series[h], v = val(s, pollutant, h), stuck = raw != null && v == null;
     if (v != null) list.push({ s, v });
-    L.circleMarker([s.lat, s.lng], { bubblingMouseEvents: false, radius: v == null ? 6 : 9 + Math.min(12, lim ? v / lim * 4 : 0), color: '#fff', weight: 2,
-        fillColor: colorFor(v), fillOpacity: v == null ? .5 : .9 })
-      .bindTooltip(v == null ? esc(s.name) : String(v), { permanent: v != null, direction: 'center', className: 'station-label' })
-      .bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.address)}<br>${pollutant}: <b>${v ?? 'дерек жоқ'}</b> мкг/м³` + (lim && v != null ? ` (${(v / lim).toFixed(1)} × шекті мән)` : ''))
+    L.circleMarker([s.lat, s.lng], { bubblingMouseEvents: false, radius: v == null ? 6 : 9 + Math.min(12, lim ? v / lim * 4 : 0), color: stuck ? '#6b7280' : '#fff', weight: 2,
+        dashArray: stuck ? '3 2' : null, fillColor: colorFor(v), fillOpacity: v == null ? .5 : .9 })
+      .bindTooltip(stuck ? `⚠${raw}` : v == null ? esc(s.name) : String(v), { permanent: raw != null, direction: 'center', className: 'station-label' })
+      .bindPopup(`<b>${esc(s.name)}</b>${s.owner ? ` · ${s.owner}` : ''}<br>${esc(s.address)}<br>${pollutant}: <b>${raw ?? 'дерек жоқ'}</b> мкг/м³` +
+        (stuck ? `<br>⚠ Бұл мән ${STALE_RUN}+ сағат бойы өзгермеген — датчик тұрып қалған немесе ескі мән. Талдауға кірмейді.`
+               : lim && v != null ? ` (${(v / lim).toFixed(1)} × шекті мән)` : ''))
       .on('click', () => { selected = s; renderChart(); })
       .addTo(layer);
   }
   list.sort((a, b) => b.v - a.v);
-  $('#top').innerHTML = list.slice(0, 6).map(x => `<li>${esc(x.s.name)} — <b>${x.v}</b></li>`).join('') || '<span class="muted">Бұл сағатта дерек жоқ</span>';
+  $('#top').innerHTML = list.slice(0, 6).map(x => `<li>${esc(x.s.name)}${x.s.owner ? ` <span class="muted">(${x.s.owner})</span>` : ''} — <b>${x.v}</b></li>`).join('') || '<span class="muted">Бұл сағатта дерек жоқ</span>';
   [...$('#top').children].forEach((li, i) => li.onclick = () => { selected = list[i].s; map.setView([selected.lat, selected.lng], 14); renderChart(); });
 
   const w = wind[h];
@@ -273,7 +301,8 @@ function renderChart() {
     type: 'line',
     data: { labels: hours.map(h => h.slice(8, 10) + '.' + h.slice(5, 7) + ' ' + h.slice(11)),
       datasets: [
-        { label: pollutant, data: hours.map(h => series[h] ?? null), borderColor: '#0f766e', spanGaps: true, pointRadius: 2 },
+        { label: pollutant, data: hours.map(h => val(selected, pollutant, h)), borderColor: '#0f766e', spanGaps: true, pointRadius: 2 },
+        { label: '⚠ өзгермеген мән', data: hours.map(h => selected.stale[pollutant]?.has(h) ? series[h] : null), borderColor: '#9ca3af', backgroundColor: '#9ca3af', showLine: false, pointRadius: 3 },
         ...(lim ? [{ label: 'шекті мән', data: hours.map(() => lim), borderColor: '#dc2626', borderDash: [6, 4], pointRadius: 0 }] : []),
       ] },
     options: { animation: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: !!lim } } },
@@ -306,15 +335,19 @@ function renderAttribution() {
   for (const s of Object.values(stations)) {
     const series = s.data[pollutant];
     if (!series) continue;
-    const bg = median(Object.values(series)); // бекеттің фоны — барлық сағаттардың медианасы
+    const clean = Object.keys(series).map(h => val(s, pollutant, h)).filter(v => v != null);
+    if (!clean.length) continue;
+    const bg = median(clean); // бекеттің фоны — барлық сағаттардың медианасы (тұрып қалған мәндерсіз)
     for (const h of win) {
-      if (series[h] == null) continue;
-      const excess = Math.max(0, series[h] - bg);
+      const v = val(s, pollutant, h);
+      if (v == null) continue;
+      const excess = Math.max(0, v - bg);
       maxEx = Math.max(maxEx, excess);
       obs.push({ hour: h, station: s, excess });
     }
   }
   renderRose(win, obs, weather, maxEx);
+  renderChronic(win);
   const w = weatherOf(hours[idx]);
   const cls = w && AirModel.stabilityClass(w.speed, w.rad, w.cloud);
   const clsLine = cls ? `<div class="muted">Атмосфера (${hours[idx].slice(11)}:00): ${cls} — ${AirModel.NAMES[cls]}</div>` : '';
@@ -400,6 +433,40 @@ function renderRose(win, obs, weather, maxEx) {
     L.polyline([[o.station.lat, o.station.lng], upwindPoint(o.station, w.dir, LINE_KM)],
       { color: '#b45309', weight: 1 + 5 * t, opacity: 0.25 + 0.6 * t, interactive: false }).addTo(roseLayer);
   }
+}
+
+/* ===== Тұрақты жоғары бекеттер: қаланың басқа бекеттерінің медианасынан үнемі жоғары =====
+   Модель (rankSources) бекеттің өз фонынан «секірісті» іздейді, сондықтан бекеттің жанындағы тұрақты көзді фон деп алып тастайды.
+   Бұл тексеру соны толықтырады: бекет кезеңнің ≥ 80% сағатында қала медианасынан CHRONIC_DIFF-тен артық жоғары ма. */
+const CITY_BOX = { lat0: 46.9, lat1: 47.3, lng0: 51.6, lng1: 52.2 };
+const inCity = s => s.lat > CITY_BOX.lat0 && s.lat < CITY_BOX.lat1 && s.lng > CITY_BOX.lng0 && s.lng < CITY_BOX.lng1;
+function renderChronic(win) {
+  const lim = LIMITS[pollutant];
+  const diffMin = lim ? Math.max(2, lim * 0.25) : 2;
+  const city = Object.values(stations).filter(s => inCity(s) && s.data[pollutant]);
+  const cityMed = {};
+  for (const h of win) {
+    const vs = city.map(s => val(s, pollutant, h)).filter(v => v != null);
+    if (vs.length >= 5) cityMed[h] = median(vs);
+  }
+  const hs = Object.keys(cityMed);
+  const res = [];
+  if (hs.length >= 2) for (const s of city) {
+    let n = 0, over = 0, sum = 0;
+    for (const h of hs) { const v = val(s, pollutant, h); if (v == null) continue; n++; const d = v - cityMed[h]; sum += d; if (d >= diffMin) over++; }
+    if (n >= 2 && over / n >= 0.8) {
+      const near = sources.filter(x => x.lat != null)
+        .map(x => ({ x, d: Math.min(...sourcePoints(x).map(([a, o]) => Math.hypot((a - s.lat) * 110.54, (o - s.lng) * 111.32 * Math.cos(s.lat * Math.PI / 180)))) }))
+        .sort((a, b) => a.d - b.d)[0];
+      res.push({ s, over, n, avg: sum / n, near });
+    }
+  }
+  res.sort((a, b) => b.avg - a.avg);
+  $('#chronic').innerHTML = !hs.length ? '' : `<b style="font-size:14px">📈 Тұрақты жоғары бекеттер</b>` + (res.length
+    ? res.map(r => `<div class="src-item">${esc(r.s.name)}${r.s.owner ? ` <span class="muted">(${r.s.owner})</span>` : ''} — қала медианасынан орта есеппен <b>+${r.avg.toFixed(1)}</b> мкг/м³ (${r.over}/${r.n} сағ.)
+        ${r.near ? `<div class="meta">Ең жақын көз: ${esc(r.near.x.name)} — ${r.near.d.toFixed(1)} км</div>` : ''}</div>`).join('')
+    : `<div class="muted">Кезеңде ешбір бекет қаладан тұрақты жоғары емес (шек: +${diffMin} мкг/м³, сағаттардың ≥ 80%).</div>`)
+    + `<div class="muted">Бұл — бекет жанындағы тұрақты көзді табуға арналған тексеру; «⚠» өзгермеген мәндер есептелмейді.</div>`;
 }
 
 /* ===== Шағым нүктелері: иіс сезілген жер → жел келген жаққа сызық → жанынан өтетін көздер ===== */
