@@ -39,6 +39,7 @@
   // начальная ширина факела: площадной источник размером size_m (большой пруд) — size/4,
   // наземный без размера (очистные) — 100 м, труба — 0
   function initialWidth(src) {
+    if (src.width_m != null) return src.width_m;
     const size = +src.size_m || 0;
     if (size > 0) return size / 4;
     return (+src.height_m || 0) < 5 ? 100 : 0;
@@ -49,9 +50,46 @@
     return [(lng - lng0) * 111320 * Math.cos(lat0 * Math.PI / 180), (lat - lat0) * 110540];
   }
 
-  /** Относительная концентрация у земли в точке приёмника от источника с высотой H.
+  // ---- площадные источники (пруд): пишут контур `area` = [[ [lat,lng], ... ], ...] (несколько частей).
+  // Внутренность режем сеткой AREA_STEP м, выброс делится поровну между точками — так учитываются и ближний край, и середина.
+  const AREA_STEP = 1000;
+  const areaCache = new WeakMap();
+  function inside(lat, lng, ring) {
+    let c = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [ai, oi] = ring[i], [aj, oj] = ring[j];
+      if ((ai > lat) !== (aj > lat) && lng < (oj - oi) * (lat - ai) / (aj - ai) + oi) c = !c;
+    }
+    return c;
+  }
+  function areaPoints(area) {
+    if (areaCache.has(area)) return areaCache.get(area);
+    const pts = [];
+    for (const ring of area) {
+      const la = ring.map(p => p[0]), lo = ring.map(p => p[1]);
+      const lat0 = Math.min(...la), lat1 = Math.max(...la), lng0 = Math.min(...lo), lng1 = Math.max(...lo);
+      const dLat = AREA_STEP / 110540, dLng = AREA_STEP / (111320 * Math.cos(lat0 * Math.PI / 180));
+      const before = pts.length;
+      for (let a = lat0 + dLat / 2; a < lat1; a += dLat)
+        for (let o = lng0 + dLng / 2; o < lng1; o += dLng)
+          if (inside(a, o, ring)) pts.push([a, o]);
+      if (pts.length === before) pts.push([la.reduce((x, y) => x + y) / la.length, lo.reduce((x, y) => x + y) / lo.length]); // маленькая часть — её центр
+    }
+    areaCache.set(area, pts);
+    return pts;
+  }
+
+  /** Относительная концентрация у земли в точке приёмника от источника (точечного или площадного).
    *  windFromDeg — откуда дует ветер (метеорологический угол). */
   function plumeAt(src, rcp, windFromDeg, u10, cls) {
+    if (!Array.isArray(src.area) || !src.area.length) return plumePoint(src, rcp, windFromDeg, u10, cls);
+    const pts = areaPoints(src.area);
+    let sum = 0;
+    for (const [lat, lng] of pts) sum += plumePoint({ lat, lng, height_m: src.height_m, width_m: AREA_STEP / 2 }, rcp, windFromDeg, u10, cls);
+    return sum / pts.length;
+  }
+
+  function plumePoint(src, rcp, windFromDeg, u10, cls) {
     const [ex, ny] = toMeters(rcp.lat, rcp.lng, src.lat, src.lng);
     const to = (windFromDeg + 180) * Math.PI / 180; // направление, куда дует
     const dx = Math.sin(to), dy = Math.cos(to);
@@ -110,5 +148,5 @@
     return [...left, ...right.reverse()];
   }
 
-  globalThis.AirModel = { stabilityClass, plumeAt, rankSources, plumeOutline, NAMES };
+  globalThis.AirModel = { stabilityClass, plumeAt, rankSources, plumeOutline, areaPoints, NAMES };
 })();

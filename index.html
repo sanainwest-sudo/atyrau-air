@@ -308,10 +308,18 @@ function renderSources() {
   renderAttribution();
   for (const s of sources) {
     if (s.lat == null) continue;
+    if (Array.isArray(s.area)) for (const ring of s.area)
+      L.polygon(ring, { color: '#0369a1', weight: 1, dashArray: '4 3', fillOpacity: 0.08, interactive: false }).addTo(srcLayer);
     L.marker([s.lat, s.lng], { draggable: editing, zIndexOffset: 1000,
         icon: L.divIcon({ className: 'src-icon', html: KIND_ICON[s.kind] || '📍', iconSize: [26, 26] }) })
       .bindTooltip(`${esc(s.name)} · биіктігі ${s.height_m} м` + (s.size_m ? ` · өлшемі ${s.size_m} м` : ''))
-      .on('dragend', e => { const p = e.target.getLatLng(); s.lat = +p.lat.toFixed(5); s.lng = +p.lng.toFixed(5); saveSources(); renderSources(); })
+      .on('dragend', e => {
+        const p = e.target.getLatLng(), dLat = p.lat - s.lat, dLng = p.lng - s.lng;
+        s.lat = +p.lat.toFixed(5); s.lng = +p.lng.toFixed(5);
+        // пішіні бар көз (тоған) — пішінін де бірге жылжытамыз
+        if (Array.isArray(s.area)) s.area = s.area.map(r => r.map(([a, o]) => [+(a + dLat).toFixed(5), +(o + dLng).toFixed(5)]));
+        saveSources(); renderSources();
+      })
       .addTo(srcLayer);
   }
   $('#srcTools').hidden = !editing;
@@ -354,7 +362,13 @@ $('#srcList').addEventListener('click', e => {
 map.on('click', e => {
   if (!editing || !placingId) return;
   const s = sources.find(x => x.id === placingId);
-  if (s) { s.lat = +e.latlng.lat.toFixed(5); s.lng = +e.latlng.lng.toFixed(5); saveSources(); }
+  if (s) {
+    if (Array.isArray(s.area) && s.lat != null) { // тоғанды жаңа орынға — пішінімен бірге
+      const dLat = e.latlng.lat - s.lat, dLng = e.latlng.lng - s.lng;
+      s.area = s.area.map(r => r.map(([a, o]) => [+(a + dLat).toFixed(5), +(o + dLng).toFixed(5)]));
+    }
+    s.lat = +e.latlng.lat.toFixed(5); s.lng = +e.latlng.lng.toFixed(5); saveSources();
+  }
   placingId = null; $('#srcHint').textContent = 'Белгіні картада сүйреңіз. Өзгерістер осы құрылғыда сақталады.';
   renderSources();
 });

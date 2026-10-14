@@ -100,3 +100,17 @@ test('одна точка, разная высота: модель отлича�
     console.log(`  истина ${truth.id} → ${info}`);
   }
 });
+
+test('площадной источник (Сасық сай): ближний край учитывается, по выбросу из пруда находит пруд', () => {
+  const pond = require('../sources.json').find(s => s.id === 'tukhlaya');
+  // ясная тихая ночь, ветер с востока — к городу; пост Химпоселок (~3 км от западного края, ~8 км от центра)
+  const him = STATIONS.find(s => s.name === 'Химпоселок');
+  const pts = globalThis.AirModel.areaPoints(pond.area);
+  const per = list => list.reduce((a, [lat, lng]) => a + plumeAt({ lat, lng, height_m: 0, width_m: 500 }, him, 95, 1.5, 'F'), 0) / list.length;
+  const near = per(pts.filter(p => p[1] < 52.01)), far = per(pts.filter(p => p[1] > 52.05));
+  console.log(`  Химпоселок: точка у ближнего края ${near.toExponential(2)}, у дальнего ${far.toExponential(2)} (×${(near / far).toFixed(1)})`);
+  assert.ok(near > 2 * far, 'ближний край должен весить больше дальнего');
+  const hours = evening(pond);
+  const { ranking } = rankSources([...SOURCES, pond], synth(pond, hours), hours);
+  assert.equal(ranking[0].source.id, 'tukhlaya', ranking.map(r => `${r.source.id}:${r.explained.toFixed(2)}`).join(' '));
+});
