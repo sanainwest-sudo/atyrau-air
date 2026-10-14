@@ -1,4 +1,4 @@
-name: Сбор погоды (ветер, солнце, облачность)
+name: Сбор погоды и постов Казгидромета (tabigat)
 
 on:
   schedule:
@@ -25,12 +25,12 @@ jobs:
           cache-dependency-path: collector/requirements.txt
       - run: pip install -r collector/requirements.txt
       # посты ecodata.kz с серверов GitHub не открываются — их собирает ноутбук (--only stations --push)
-      - run: python collector/collect.py --only weather --log cloud.log
+      - run: python collector/collect.py --only weather,kgm --log cloud.log
       - name: Сохранить данные в репозиторий
         if: always()
         run: |
           git config user.name "collector-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data/wind.csv data/cloud.log
+          git add data/wind.csv data/kgm.csv data/cloud.log
           git diff --cached --quiet || git commit -m "Погода $(TZ=Asia/Almaty date '+%Y-%m-%d %H:%M')"
           git pull --rebase && git push

@@ -2,11 +2,12 @@
 
 Запуск раз в час. ecodata.kz открывается только из Казахстана, поэтому:
   ноутбук:  collect.py --only stations --log local.log --push   (посты → сразу в GitHub)
-  GitHub:   collect.py --only weather --log cloud.log            (погода)
+  GitHub:   collect.py --only weather,kgm --log cloud.log        (погода + посты Казгидромета с tabigat.gov.kz)
 """
 import argparse
 import csv
 import json
+import math
 import os
 import subprocess
 import sys
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 STATIONS_CSV = DATA / "stations.csv"
 WIND_CSV = DATA / "wind.csv"
+KGM_CSV = DATA / "kgm.csv"
 LOG = DATA / "collect.log"  # меняется аргументом --log
 
 ECODATA_URL = "http://ecodata.kz:3838/app_dem_visual/"
@@ -33,6 +35,22 @@ BROWSER_CHANNEL = os.environ.get("BROWSER_CHANNEL", "msedge" if os.name == "nt" 
 STATION_FIELDS = ["fetched_at_utc", "station", "address", "lat", "lng", "measured_at", "pollutant", "value"]
 WIND_FIELDS = ["time_local", "wind_dir_deg", "wind_speed_ms", "wind_gust_ms", "radiation_wm2", "cloud_pct"]
 WEATHER_START = "2026-10-12"  # погода нужна с начала сбора постов (с запасом)
+
+# tabigat.gov.kz (портал Минэкологии): слой «Состояние атмосферного воздуха» — посты Казгидромета
+# с десятичными значениями и СВОИМ ветром. Открытый GeoServer WFS, координаты EPSG:3857.
+TABIGAT_LAYER_ID = "85a41068-0bd1-427d-8958-86b44a696eba"
+TABIGAT_ATTRS = f"https://tabigat.gov.kz/api/v1/gis/main/open-api-layers/{TABIGAT_LAYER_ID}/attrs"
+TABIGAT_WFS = ("https://tabigat.gov.kz/geoserver/gis/wfs?service=WFS&version=1.0.0&request=GetFeature"
+               "&typeName=gis:layer_48572&outputFormat=application/json&maxFeatures=5000")
+KGM_PARAMS = {  # nameRu поля → код в kgm.csv (единицы как в источнике)
+    "Направление ветра (градусы)": "wind_dir", "Скорость ветра (м/с)": "wind_speed",
+    "Температура (°C)": "temp", "Давление (мм рт. ст.)": "pressure",
+    "Сероводород (мкг/м3)": "H2S", "Диоксид серы (мкг/м3)": "SO2", "Оксид азота (мкг/м3)": "NO",
+    "Диоксид азота (мкг/м3)": "NO2", "Оксид углерода (мкг/м3)": "CO",
+    "Частицы PM2.5 (мг/м3)": "PM2.5_mg", "Частицы PM10 (мг/м3)": "PM10_mg",
+    "Взвешенные вещества (частицы, мг/м3)": "PMtot_mg",
+}
+KGM_FIELDS = ["fetched_at_utc", "station_id", "lat", "lng", "measured_at", "param", "value"]
 
 # Достаёт из карты все точки в рамке BBOX и разбирает таблицу во всплывающем окне
 EXTRACT_JS = """(b) => {
@@ -141,6 +159,41 @@ def get_json(url, attempts=3):
             time.sleep(10 * (i + 1))
 
 
+def collect_kgm():
+    """Посты Казгидромета с tabigat.gov.kz: дописывает новые (пост, час, параметр) в data/kgm.csv."""
+    attrs = get_json(TABIGAT_ATTRS)
+    code = {a["attrname"]: KGM_PARAMS[a["nameRu"]] for a in attrs if a.get("nameRu") in KGM_PARAMS}
+    name = {a["nameRu"]: a["attrname"] for a in attrs}
+    date_attr, id_attr = name["Дата"], name["ID Станции"]
+    feats = get_json(TABIGAT_WFS)["features"]
+    key = lambda r: (r["station_id"], r["measured_at"], r["param"])
+    seen = read_keys(KGM_CSV, key)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows, n_pts = [], 0
+    for f in feats:
+        x, y = f["geometry"]["coordinates"]
+        lng = x / 6378137 * 180 / math.pi
+        lat = math.degrees(2 * math.atan(math.exp(y / 6378137)) - math.pi / 2)
+        if not (BBOX["lat_min"] <= lat <= BBOX["lat_max"] and BBOX["lng_min"] <= lng <= BBOX["lng_max"]):
+            continue
+        p = f["properties"]
+        if not p.get(date_attr):
+            continue
+        n_pts += 1
+        t = datetime.fromisoformat(p[date_attr].replace("Z", "+00:00")).astimezone(ATYRAU_TZ)
+        for attr, c in code.items():
+            v = p.get(attr)
+            if v is None:
+                continue
+            r = {"fetched_at_utc": now, "station_id": p.get(id_attr), "lat": f"{lat:.5f}", "lng": f"{lng:.5f}",
+                 "measured_at": t.strftime("%Y-%m-%d %H:%M:%S"), "param": c, "value": round(float(v), 4)}
+            if key({k: str(v2) for k, v2 in r.items()}) not in seen:
+                seen.add(key({k: str(v2) for k, v2 in r.items()}))
+                rows.append(r)
+    append_rows(KGM_CSV, KGM_FIELDS, rows)
+    return n_pts, len(rows)
+
+
 def collect_wind():
     """Погода по часам с WEATHER_START до текущего часа; файл пересобирается целиком (Open-Meteo уточняет прошлые часы)."""
     lat, lng = WIND_POINT
@@ -188,20 +241,28 @@ def push(paths):
 def main():
     global LOG
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["all", "stations", "weather"], default="all")
+    ap.add_argument("--only", default="all", help="через запятую: stations, weather, kgm (или all)")
     ap.add_argument("--log", default="collect.log")
     ap.add_argument("--push", action="store_true", help="после сбора отправить данные в GitHub")
     a = ap.parse_args()
     LOG = DATA / a.log
+    parts = {"stations", "weather", "kgm"} if a.only == "all" else set(a.only.split(","))
     ok = True
-    if a.only in ("all", "stations"):
+    if "stations" in parts:
         try:
             n_points, n_rows = collect_stations()
             log(f"посты: {n_points} точек, новых строк {n_rows}")
         except Exception as e:
             ok = False
             log(f"ОШИБКА посты: {e!r}")
-    if a.only in ("all", "weather"):
+    if "kgm" in parts:
+        try:
+            n_pts, n_rows = collect_kgm()
+            log(f"казгидромет (tabigat): {n_pts} постов, новых строк {n_rows}")
+        except Exception as e:
+            ok = False
+            log(f"ОШИБКА казгидромет: {e!r}")
+    if "weather" in parts:
         try:
             log(f"погода: часов в файле {collect_wind()}")
         except Exception as e:
