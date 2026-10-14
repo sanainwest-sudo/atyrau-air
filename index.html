@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="kk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Атырау ауасы</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="model.js"></script>
+<style>
+  :root { --bg: #f4f5f7; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6ea; --accent: #0f766e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { background: var(--accent); color: #fff; padding: 12px 16px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header p { margin: 2px 0 0; opacity: .85; font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 12px 16px 24px; display: grid; gap: 12px; grid-template-columns: 1fr 340px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border-radius: 10px; padding: 12px; }
+  #map { height: 62vh; min-height: 360px; border-radius: 10px; }
+  .time { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .time input { flex: 1; }
+  .time b { min-width: 125px; font-variant-numeric: tabular-nums; }
+  button { border: 0; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; background: var(--bg); color: var(--text); }
+  button.on { background: var(--accent); color: #fff; }
+  .wind { display: flex; gap: 12px; align-items: center; }
+  .wind svg { flex: none; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .legend { display: grid; gap: 4px; font-size: 13px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  ol { margin: 0; padding-left: 20px; }
+  ol li { margin: 2px 0; cursor: pointer; }
+  .side { display: grid; gap: 12px; align-content: start; }
+  .station-label { background: none; border: 0; box-shadow: none; padding: 0; font-weight: 700; font-size: 11px; color: #fff; text-shadow: 0 0 2px #000; }
+  .station-label::before { display: none; }
+  .src-icon { font-size: 22px; line-height: 1; text-align: center; filter: drop-shadow(0 0 2px #fff); }
+  .src-item { border-top: 1px solid var(--line); padding: 8px 0; font-size: 14px; }
+  .src-item .meta { color: var(--muted); font-size: 12px; }
+  .src-item input, .src-item select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  .src-item .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .src-item.placing { background: #fef3c7; }
+  .bar { display: grid; grid-template-columns: 1fr 44px; gap: 6px; align-items: center; font-size: 13px; margin: 4px 0; }
+  .bar .track { background: var(--bg); border-radius: 4px; height: 8px; margin-top: 3px; }
+  .bar .fill { background: #b45309; height: 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌬️ Атырау ауасы: иіс қайдан келеді?</h1>
+  <p>Күкіртсутек (H2S) бекеттері + жел бағыты, сағат бойынша</p>
+</header>
+<main>
+  <div>
+    <div id="map"></div>
+    <div class="card time">
+      <button id="play" title="Ойнату">▶</button>
+      <input type="range" id="slider" min="0" max="0" value="0">
+      <b id="hourLabel">—</b>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2 id="chartTitle">Бекетті таңдаңыз — уақыт бойынша график</h2>
+      <canvas id="chart" height="110"></canvas>
+    </div>
+  </div>
+  <div class="side">
+    <div class="card wind">
+      <svg id="windArrow" width="64" height="64" viewBox="-32 -32 64 64">
+        <circle r="30" fill="none" stroke="#e3e6ea" stroke-width="2"/>
+        <text y="-19" text-anchor="middle" font-size="10" fill="#6b7280">С</text>
+        <g id="arrowG"><path d="M0,-22 L7,6 L0,1 L-7,6 Z" fill="#0f766e"/><line x1="0" y1="1" x2="0" y2="22" stroke="#0f766e" stroke-width="3"/></g>
+      </svg>
+      <div><b id="windText">Жел: —</b><div class="muted" id="windSub">Open-Meteo, қала орталығы</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0">🔎 Көзді анықтау</h2>
+        <select id="attrWindow">
+          <option value="1">таңдалған сағат</option>
+          <option value="6" selected>соңғы 6 сағат</option>
+          <option value="12">соңғы 12 сағат</option>
+        </select>
+      </div>
+      <div id="attr" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>Зат</h2>
+      <div id="pollutants" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+    <div class="card legend" id="legend"></div>
+    <div class="card">
+      <h2>Ең жоғары (таңдалған сағат)</h2>
+      <ol id="top"></ol>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0">Ықтимал көздер</h2>
+        <button id="editBtn">✏️ Түзету</button>
+      </div>
+      <div id="srcList" style="margin-top:8px"></div>
+      <div id="srcTools" hidden>
+        <p class="muted" id="srcHint">Белгіні картада сүйреңіз. Өзгерістер осы құрылғыда сақталады.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button id="srcAdd">➕ Жаңа көз</button>
+          <button id="srcExport">⬇️ Файлға сақтау</button>
+          <button id="srcReset">↺ Бастапқы тізім</button>
+        </div>
+      </div>
+    </div>
+    <div class="card muted" id="info"></div>
+  </div>
+</main>
+
+<script>
+/* H2S шекті мәні: 8 мкг/м³ (0,008 мг/м³) — ТЕКСЕРУ КЕРЕК ресми құжат бойынша */
+const LIMITS = { H2S: 8 };
+const LEVELS = [
+  { max: 0.5, color: '#16a34a', label: 'шекті мәннің жартысына дейін' },
+  { max: 1,   color: '#eab308', label: 'шекті мәнге жақын' },
+  { max: 5,   color: '#dc2626', label: 'шекті мәннен жоғары' },
+  { max: Infinity, color: '#7f1d1d', label: '5 есе және одан жоғары' },
+];
+const NO_DATA = '#9ca3af';
+const DIRS = ['солтүстіктен', 'солтүстік-шығыстан', 'шығыстан', 'оңтүстік-шығыстан', 'оңтүстіктен', 'оңтүстік-батыстан', 'батыстан', 'солтүстік-батыстан'];
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const loadCsv = url => new Promise((ok, err) => Papa.parse(url + '?t=' + Date.now(), { download: true, header: true, skipEmptyLines: true, complete: r => ok(r.data), error: err }));
+
+let stations = {}, hours = [], wind = {}, pollutant = 'H2S', idx = 0, chart, selected = null, timer = null;
+const map = L.map('map').setView([47.11, 51.92], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+const layer = L.layerGroup().addTo(map);
+
+function colorFor(v) {
+  if (v == null) return NO_DATA;
+  const lim = LIMITS[pollutant];
+  if (!lim) return '#2563eb';
+  return LEVELS.find(l => v / lim <= l.max).color;
+}
+
+async function init() {
+  const [rows, windRows] = await Promise.all([loadCsv('data/stations.csv'), loadCsv('data/wind.csv')]);
+  // только почасовые замеры; ручные посты (одна дата в сутки) в почасовой шкале не участвуют
+  const hourSet = new Set();
+  for (const r of rows) {
+    if (!/\d{2}:\d{2}:\d{2}$/.test(r.measured_at)) continue;
+    // істен шыққан бекеттер: замер алынған уақыттан 2 тәуліктен ескі болса — өткізіп жібереміз
+    if (new Date(r.fetched_at_utc) - new Date(r.measured_at.replace(' ', 'T') + '+05:00') > 2 * 864e5) continue;
+    const key = r.station + '|' + r.lat + '|' + r.lng;
+    const st = stations[key] ??= { name: r.station, address: r.address, lat: +r.lat, lng: +r.lng, data: {} };
+    const h = r.measured_at.slice(0, 13);
+    (st.data[r.pollutant] ??= {})[h] = +r.value;
+    hourSet.add(h);
+  }
+  for (const w of windRows) wind[w.time_local.replace('T', ' ').slice(0, 13)] = w;
+  // шкала — барлық сағаттар қатарынан, бос сағаттар да
+  const sorted = [...hourSet].sort();
+  hours = [];
+  if (sorted.length) {
+    const hourKey = d => d.toISOString().slice(0, 13).replace('T', ' ');
+    for (let t = new Date(sorted[0] + ':00:00Z'), end = new Date(sorted.at(-1) + ':00:00Z'); t <= end; t = new Date(+t + 36e5)) hours.push(hourKey(t));
+  }
+  const pols = [...new Set(Object.values(stations).flatMap(s => Object.keys(s.data)))].sort((a, b) => (b === 'H2S') - (a === 'H2S') || a.localeCompare(b));
+  $('#pollutants').innerHTML = pols.map(p => `<button data-p="${p}" class="${p === pollutant ? 'on' : ''}">${p}</button>`).join('');
+  $('#pollutants').onclick = e => { const p = e.target.dataset.p; if (!p) return; pollutant = p;
+    document.querySelectorAll('#pollutants button').forEach(b => b.classList.toggle('on', b.dataset.p === p)); render(); renderChart(); };
+  $('#slider').max = Math.max(0, hours.length - 1);
+  idx = hours.length - 1;
+  $('#slider').value = idx;
+  $('#info').innerHTML = `Бекеттер: ${Object.keys(stations).length}. Сағаттар: ${hours.length} (${hours[0] ?? '—'}:00 – ${hours.at(-1) ?? '—'}:00).<br>
+    Дереккөз: <a href="http://ecodata.kz:3838/app_dem_visual/" target="_blank">Қазгидромет картасы</a>, жел — Open-Meteo.
+    ТШО және NCOC деректері — өңделмеген (сайттағы ескерту бойынша).`;
+  const pts = Object.values(stations).filter(s => s.lat > 46.9 && s.lat < 47.3 && s.lng > 51.6 && s.lng < 52.2);
+  if (pts.length) map.fitBounds(pts.map(s => [s.lat, s.lng]), { padding: [20, 20] });
+  render();
+}
+
+function render() {
+  const h = hours[idx];
+  $('#hourLabel').textContent = h ? h.slice(8, 10) + '.' + h.slice(5, 7) + ' ' + h.slice(11) + ':00' : '—';
+  layer.clearLayers();
+  const lim = LIMITS[pollutant];
+  const list = [];
+  for (const s of Object.values(stations)) {
+    const series = s.data[pollutant];
+    if (!series) continue;
+    const v = series[h];
+    if (v != null) list.push({ s, v });
+    L.circleMarker([s.lat, s.lng], { radius: v == null ? 6 : 9 + Math.min(12, lim ? v / lim * 4 : 0), color: '#fff', weight: 2,
+        fillColor: colorFor(v), fillOpacity: v == null ? .5 : .9 })
+      .bindTooltip(v == null ? esc(s.name) : String(v), { permanent: v != null, direction: 'center', className: 'station-label' })
+      .bindPopup(`<b>${esc(s.name)}</b><br>${esc(s.address)}<br>${pollutant}: <b>${v ?? 'дерек жоқ'}</b> мкг/м³` + (lim && v != null ? ` (${(v / lim).toFixed(1)} × шекті мән)` : ''))
+      .on('click', () => { selected = s; renderChart(); })
+      .addTo(layer);
+  }
+  list.sort((a, b) => b.v - a.v);
+  $('#top').innerHTML = list.slice(0, 6).map(x => `<li>${esc(x.s.name)} — <b>${x.v}</b></li>`).join('') || '<span class="muted">Бұл сағатта дерек жоқ</span>';
+  [...$('#top').children].forEach((li, i) => li.onclick = () => { selected = list[i].s; map.setView([selected.lat, selected.lng], 14); renderChart(); });
+
+  const w = wind[h];
+  if (w) {
+    const deg = +w.wind_dir_deg;
+    // метеорологиялық бағыт — жел ҚАЙДАН соғады; бағдарша — ҚАЙДА соғады
+    $('#arrowG').setAttribute('transform', `rotate(${deg + 180})`);
+    $('#windText').textContent = `Жел ${DIRS[Math.round(deg / 45) % 8]}, ${(+w.wind_speed_ms).toFixed(1)} м/с`;
+    $('#windSub').textContent = `${Math.round(deg)}°, екпіні ${(+w.wind_gust_ms).toFixed(1)} м/с · Open-Meteo`;
+  } else { $('#windText').textContent = 'Жел: дерек жоқ'; $('#windSub').textContent = ''; }
+  renderAttribution();
+
+  $('#legend').innerHTML = lim
+    ? `<b>${pollutant}, шекті мән ${lim} мкг/м³</b><span class="muted">шекті мән — тексеру керек</span>` + LEVELS.map(l => `<span><i style="background:${l.color}"></i>${l.label}</span>`).join('') + `<span><i style="background:${NO_DATA}"></i>бұл сағатта дерек жоқ</span>`
+    : `<b>${pollutant}</b><span class="muted">Шекті мән енгізілмеген — көк түспен</span>`;
+}
+
+function renderChart() {
+  if (!selected) return;
+  const series = selected.data[pollutant] || {};
+  $('#chartTitle').textContent = `${selected.name} — ${pollutant}, мкг/м³`;
+  const lim = LIMITS[pollutant];
+  chart?.destroy();
+  chart = new Chart($('#chart'), {
+    type: 'line',
+    data: { labels: hours.map(h => h.slice(8, 10) + '.' + h.slice(5, 7) + ' ' + h.slice(11)),
+      datasets: [
+        { label: pollutant, data: hours.map(h => series[h] ?? null), borderColor: '#0f766e', spanGaps: true, pointRadius: 2 },
+        ...(lim ? [{ label: 'шекті мән', data: hours.map(() => lim), borderColor: '#dc2626', borderDash: [6, 4], pointRadius: 0 }] : []),
+      ] },
+    options: { animation: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: !!lim } } },
+  });
+}
+
+$('#slider').oninput = e => { idx = +e.target.value; render(); };
+$('#play').onclick = () => {
+  if (timer) { clearInterval(timer); timer = null; $('#play').textContent = '▶'; return; }
+  $('#play').textContent = '⏸';
+  if (idx >= hours.length - 1) idx = 0;
+  timer = setInterval(() => { idx = (idx + 1) % hours.length; $('#slider').value = idx; render(); if (idx === hours.length - 1) $('#play').click(); }, 700);
+};
+
+/* ===== Көзді анықтау: модель (model.js) + бекеттердегі фоннан артық мән ===== */
+const MIN_EXCESS = 2; // мкг/м³ — бұдан аз артықшылық шу деп есептеледі
+const plumeLayer = L.layerGroup().addTo(map);
+const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+const weatherOf = h => { const w = wind[h]; return w && { dir: +w.wind_dir_deg, speed: +w.wind_speed_ms, rad: +w.radiation_wm2 || 0, cloud: +w.cloud_pct || 0 }; };
+
+function renderAttribution() {
+  plumeLayer.clearLayers();
+  if (!hours.length || !sources.length) return;
+  const n = +$('#attrWindow').value;
+  const win = hours.slice(Math.max(0, idx - n + 1), idx + 1);
+  const weather = {}, obs = [];
+  for (const h of win) { const w = weatherOf(h); if (w) weather[h] = w; }
+  let maxEx = 0;
+  for (const s of Object.values(stations)) {
+    const series = s.data[pollutant];
+    if (!series) continue;
+    const bg = median(Object.values(series)); // бекеттің фоны — барлық сағаттардың медианасы
+    for (const h of win) {
+      if (series[h] == null) continue;
+      const excess = Math.max(0, series[h] - bg);
+      maxEx = Math.max(maxEx, excess);
+      obs.push({ hour: h, station: s, excess });
+    }
+  }
+  const w = weatherOf(hours[idx]);
+  const cls = w && AirModel.stabilityClass(w.speed, w.rad, w.cloud);
+  const clsLine = cls ? `<div class="muted">Атмосфера (${hours[idx].slice(11)}:00): ${cls} — ${AirModel.NAMES[cls]}</div>` : '';
+  if (maxEx < MIN_EXCESS) {
+    $('#attr').innerHTML = `<div class="muted">Бұл кезеңде бекеттерде ${pollutant} фоннан айтарлықтай жоғары емес (артықшылық ${maxEx.toFixed(1)} мкг/м³ < ${MIN_EXCESS}). Көзді анықтауға негіз жоқ.</div>` + clsLine;
+    return;
+  }
+  const { ranking } = AirModel.rankSources(sources, obs, weather);
+  const best = ranking[0];
+  $('#attr').innerHTML = ranking.filter(r => r.share > 0.005).map(r => `
+      <div class="bar"><div>${KIND_ICON[r.source.kind] || '📍'} ${esc(r.source.name)} · ${r.source.height_m} м
+        <div class="track"><div class="fill" style="width:${(r.share * 100).toFixed(0)}%"></div></div></div>
+        <b>${(r.share * 100).toFixed(0)}%</b></div>`).join('')
+    + `<div class="muted" style="margin-top:6px">Ең жақсы көз артық ${pollutant}-тің ${(best.explained * 100).toFixed(0)}%-ын түсіндіреді.
+       Бұл — ықтималдық, кінәліні дәлелдеу емес.</div>` + clsLine;
+  if (best && best.share > 0 && w && cls) {
+    L.polygon(AirModel.plumeOutline(best.source, w.dir, cls), { color: '#b45309', weight: 1, fillOpacity: 0.15, interactive: false }).addTo(plumeLayer);
+  }
+}
+$('#attrWindow').onchange = renderAttribution;
+
+/* ===== Ықтимал көздер: sources.json + осы құрылғыдағы түзетулер ===== */
+const SRC_KEY = 'atyrau-air-sources-v1';
+const KINDS = { high: 'Биік (құбыр, факел)', low: 'Аласа (резервуар, ғимарат)', ground: 'Жер деңгейі (тоған, тазарту)' };
+const KIND_ICON = { high: '🏭', low: '🛢️', ground: '💧' };
+let sources = [], defaultSources = [], editing = false, placingId = null;
+const srcLayer = L.layerGroup().addTo(map);
+
+function saveSources() { try { localStorage.setItem(SRC_KEY, JSON.stringify(sources)); } catch {} }
+
+async function loadSources() {
+  defaultSources = await fetch('sources.json?t=' + Date.now()).then(r => r.json());
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SRC_KEY)); } catch {}
+  sources = Array.isArray(saved) ? saved : structuredClone(defaultSources);
+  renderSources();
+}
+
+function renderSources() {
+  srcLayer.clearLayers();
+  renderAttribution();
+  for (const s of sources) {
+    if (s.lat == null) continue;
+    L.marker([s.lat, s.lng], { draggable: editing, zIndexOffset: 1000,
+        icon: L.divIcon({ className: 'src-icon', html: KIND_ICON[s.kind] || '📍', iconSize: [26, 26] }) })
+      .bindTooltip(`${esc(s.name)} · ${s.height_m} м`)
+      .on('dragend', e => { const p = e.target.getLatLng(); s.lat = +p.lat.toFixed(5); s.lng = +p.lng.toFixed(5); saveSources(); renderSources(); })
+      .addTo(srcLayer);
+  }
+  $('#srcTools').hidden = !editing;
+  $('#editBtn').textContent = editing ? '✔ Дайын' : '✏️ Түзету';
+  $('#srcList').innerHTML = sources.map(s => editing ? `
+    <div class="src-item ${placingId === s.id ? 'placing' : ''}" data-id="${s.id}">
+      <input data-f="name" value="${esc(s.name)}" style="width:100%">
+      <div class="row">
+        <select data-f="kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${k === s.kind ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        <label class="muted">биіктік <input data-f="height_m" type="number" min="0" step="1" value="${s.height_m}" style="width:70px"> м</label>
+      </div>
+      <div class="row">
+        <button data-act="place">${s.lat == null ? '📍 Картаға қою' : '📍 Басқа жерге қою'}</button>
+        <button data-act="del">🗑️</button>
+        <span class="meta">${s.lat == null ? 'орны белгісіз' : s.lat + ', ' + s.lng}</span>
+      </div>
+      ${s.note ? `<div class="meta">${esc(s.note)}</div>` : ''}
+    </div>` : `
+    <div class="src-item">${KIND_ICON[s.kind] || '📍'} <b>${esc(s.name)}</b> · ${s.height_m} м
+      ${s.lat == null ? '<div class="meta">орны белгісіз — «Түзету» арқылы картаға қойыңыз</div>' : ''}</div>`).join('');
+}
+
+$('#editBtn').onclick = () => { editing = !editing; placingId = null; renderSources(); };
+$('#srcList').addEventListener('change', e => {
+  const item = e.target.closest('[data-id]'); const f = e.target.dataset.f;
+  if (!item || !f) return;
+  const s = sources.find(x => x.id === item.dataset.id);
+  s[f] = f === 'height_m' ? Math.max(0, +e.target.value || 0) : e.target.value;
+  saveSources(); renderSources();
+});
+$('#srcList').addEventListener('click', e => {
+  const act = e.target.dataset.act; const item = e.target.closest('[data-id]');
+  if (!act || !item) return;
+  const id = item.dataset.id;
+  if (act === 'del' && confirm('Бұл көзді өшіру керек пе?')) { sources = sources.filter(x => x.id !== id); saveSources(); }
+  if (act === 'place') { placingId = id; $('#srcHint').textContent = 'Енді картадағы орынды басыңыз.'; }
+  renderSources();
+});
+map.on('click', e => {
+  if (!editing || !placingId) return;
+  const s = sources.find(x => x.id === placingId);
+  if (s) { s.lat = +e.latlng.lat.toFixed(5); s.lng = +e.latlng.lng.toFixed(5); saveSources(); }
+  placingId = null; $('#srcHint').textContent = 'Белгіні картада сүйреңіз. Өзгерістер осы құрылғыда сақталады.';
+  renderSources();
+});
+$('#srcAdd').onclick = () => {
+  const s = { id: 'src' + Date.now(), name: 'Жаңа көз', lat: null, lng: null, height_m: 0, kind: 'ground', note: '' };
+  sources.push(s); placingId = s.id; $('#srcHint').textContent = 'Енді картадағы орынды басыңыз.';
+  saveSources(); renderSources();
+};
+$('#srcExport').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(sources, null, 2)], { type: 'application/json' }));
+  a.download = 'sources.json'; a.click();
+};
+$('#srcReset').onclick = () => {
+  if (!confirm('Барлық түзетулерді өшіріп, бастапқы тізімге қайту керек пе?')) return;
+  sources = structuredClone(defaultSources); saveSources(); renderSources();
+};
+
+init().catch(e => { $('#info').textContent = 'Деректер жүктелмеді: ' + e; });
+loadSources().catch(e => { $('#srcList').textContent = 'Көздер тізімі жүктелмеді: ' + e; });
+</script>
+</body>
+</html>

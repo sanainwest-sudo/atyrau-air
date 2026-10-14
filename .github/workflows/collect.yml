@@ -1,0 +1,36 @@
+name: Сбор H2S и ветра
+
+on:
+  schedule:
+    - cron: "7 * * * *"   # каждый час в :07 (UTC); GitHub иногда запускает с задержкой
+  workflow_dispatch:       # кнопка «Run workflow» для ручного запуска
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: collector/requirements.txt
+      - run: pip install -r collector/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python collector/collect.py
+      - name: Сохранить данные в репозиторий
+        if: always()
+        run: |
+          git config user.name "collector-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Данные $(TZ=Asia/Almaty date '+%Y-%m-%d %H:%M')"
+          git pull --rebase && git push
