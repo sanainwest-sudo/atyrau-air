@@ -91,6 +91,13 @@
         </select>
       </div>
       <div id="attr" style="margin-top:8px"></div>
+      <label class="muted" style="display:flex;gap:6px;align-items:center;margin-top:8px;cursor:pointer">
+        <input type="checkbox" id="roseChk"> 🧭 Жел розасы және талдау сызықтары
+      </label>
+      <div id="roseBox" hidden style="margin-top:6px">
+        <svg id="rose" viewBox="-100 -100 200 200" width="200" height="200" style="display:block;margin:0 auto"></svg>
+        <div class="muted" id="roseNote"></div>
+      </div>
     </div>
     <div class="card">
       <h2>Зат</h2>
@@ -298,6 +305,7 @@ function renderAttribution() {
       obs.push({ hour: h, station: s, excess });
     }
   }
+  renderRose(win, obs, weather, maxEx);
   const w = weatherOf(hours[idx]);
   const cls = w && AirModel.stabilityClass(w.speed, w.rad, w.cloud);
   const clsLine = cls ? `<div class="muted">Атмосфера (${hours[idx].slice(11)}:00): ${cls} — ${AirModel.NAMES[cls]}</div>` : '';
@@ -324,6 +332,58 @@ function renderAttribution() {
   }
 }
 $('#attrWindow').onchange = renderAttribution;
+
+/* ===== Жел розасы + талдау сызықтары (бекеттен желге қарсы) ===== */
+const roseLayer = L.layerGroup().addTo(map);
+const LINE_KM = 12;           // сызық ұзындығы
+const ROSE_DIRS = ['С', 'СШ', 'Ш', 'ОШ', 'О', 'ОБ', 'Б', 'СБ']; // солтүстік, шығыс, оңтүстік, батыс
+try { $('#roseChk').checked = localStorage.getItem('atyrau-air-rose') === '1'; } catch {}
+$('#roseChk').onchange = () => { try { localStorage.setItem('atyrau-air-rose', $('#roseChk').checked ? '1' : '0'); } catch {} renderAttribution(); };
+
+// бекеттен «жел келген жаққа» қарай нүкте
+function upwindPoint(st, fromDeg, km) {
+  const a = fromDeg * Math.PI / 180;
+  return [st.lat + km * 1000 * Math.cos(a) / 110540, st.lng + km * 1000 * Math.sin(a) / (111320 * Math.cos(st.lat * Math.PI / 180))];
+}
+
+function renderRose(win, obs, weather, maxEx) {
+  roseLayer.clearLayers();
+  const on = $('#roseChk').checked;
+  $('#roseBox').hidden = !on;
+  if (!on) return;
+  // 1) жел розасы: 16 сектор — желдің жиілігі (сұр) және сол бағытпен келген артық H2S (қоңыр)
+  const freq = Array(16).fill(0), pol = Array(16).fill(0);
+  for (const h of win) {
+    const w = weather[h]; if (!w) continue;
+    const k = Math.round(w.dir / 22.5) % 16;
+    freq[k]++;
+    pol[k] += obs.filter(o => o.hour === h).reduce((a, o) => a + o.excess, 0);
+  }
+  const fMax = Math.max(...freq) || 1, pMax = Math.max(...pol) || 1;
+  const wedge = (k, r, color, op) => {
+    const a0 = (k * 22.5 - 10) * Math.PI / 180, a1 = (k * 22.5 + 10) * Math.PI / 180;
+    return `<path d="M0,0 L${(r * Math.sin(a0)).toFixed(1)},${(-r * Math.cos(a0)).toFixed(1)} A${r},${r} 0 0 1 ${(r * Math.sin(a1)).toFixed(1)},${(-r * Math.cos(a1)).toFixed(1)} Z" fill="${color}" fill-opacity="${op}"/>`;
+  };
+  let svg = [30, 60, 85].map(r => `<circle r="${r}" fill="none" stroke="#e3e6ea"/>`).join('');
+  svg += ROSE_DIRS.map((d, i) => { const a = i * 45 * Math.PI / 180; return `<text x="${(94 * Math.sin(a)).toFixed(0)}" y="${(-94 * Math.cos(a) + 4).toFixed(0)}" text-anchor="middle" font-size="10" fill="#6b7280">${d}</text>`; }).join('');
+  svg += freq.map((f, k) => f ? wedge(k, 85 * f / fMax, '#9ca3af', 0.55) : '').join('');
+  svg += pol.map((v, k) => v > 0 ? wedge(k, 85 * v / pMax, '#b45309', 0.7) : '').join('');
+  $('#rose').innerHTML = svg;
+  const nHours = Object.keys(weather).length;
+  const topK = pol.indexOf(Math.max(...pol));
+  $('#roseNote').innerHTML = `Кезең: ${nHours} сағат. Сұр — жел қай жақтан қаншалықты жиі соқты; қоңыр — ${pollutant} артықшылығын қай жақтан соққан жел әкелді.` +
+    (Math.max(...pol) > 0 ? ` Көбі — <b>${['солтүстік', 'солтүстік-солтүстік-шығыс', 'солтүстік-шығыс', 'шығыс-солтүстік-шығыс', 'шығыс', 'шығыс-оңтүстік-шығыс', 'оңтүстік-шығыс', 'оңтүстік-оңтүстік-шығыс', 'оңтүстік', 'оңтүстік-оңтүстік-батыс', 'оңтүстік-батыс', 'батыс-оңтүстік-батыс', 'батыс', 'батыс-солтүстік-батыс', 'солтүстік-батыс', 'солтүстік-солтүстік-батыс'][topK]}</b> жақтан.` : ' Бұл кезеңде артықшылық жоқ.') +
+    `<br>Картада: артықшылық болған бекеттен жел келген жаққа ${LINE_KM} км сызық (сағатына біреу), қалыңдығы — артықшылыққа сай. Сызықтар тоғысқан жер — ықтимал көз.`;
+  // 2) картадағы талдау сызықтары
+  if (maxEx <= 0) return;
+  for (const o of obs) {
+    const w = weather[o.hour];
+    if (!w || o.excess < 0.5) continue;
+    const t = o.excess / maxEx;
+    L.polyline([[o.station.lat, o.station.lng], upwindPoint(o.station, w.dir, LINE_KM)],
+      { color: '#b45309', weight: 1 + 5 * t, opacity: 0.25 + 0.6 * t, interactive: false }).addTo(roseLayer);
+  }
+}
 
 /* ===== Ықтимал көздер: sources.json + осы құрылғыдағы түзетулер ===== */
 const SRC_KEY = 'atyrau-air-sources-v1';
