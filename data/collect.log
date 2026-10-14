@@ -16,3 +16,6 @@
 2026-10-14 15:07:22 погода: часов в файле 64
 2026-10-14 15:10:06 посты: 27 точек, новых строк 0
 2026-10-14 15:10:07 погода: часов в файле 64
+2026-10-14 15:19:43 посты: повтор после ошибки TimeoutError('Page.goto: Timeout 90000ms exceeded.\nCall log:\n  - navigating to "http://ecodata.kz:3838/app_dem_visual/", waiting until "load"\n')
+2026-10-14 15:21:13 ОШИБКА посты: TimeoutError('Page.goto: Timeout 90000ms exceeded.\nCall log:\n  - navigating to "http://ecodata.kz:3838/app_dem_visual/", waiting until "load"\n')
+2026-10-14 15:21:14 погода: часов в файле 64
