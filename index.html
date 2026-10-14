@@ -36,6 +36,13 @@
   .side { display: grid; gap: 12px; align-content: start; }
   .station-label { background: none; border: 0; box-shadow: none; padding: 0; font-weight: 700; font-size: 11px; color: #fff; text-shadow: 0 0 2px #000; }
   .station-label::before { display: none; }
+  .info { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border-radius: 50%;
+          background: var(--accent); color: #fff; font: italic 700 11px/1 Georgia, serif; cursor: help; vertical-align: 1px; margin-left: 4px; }
+  .info .tip { display: none; position: absolute; right: -8px; top: 22px; z-index: 2000; width: min(300px, 80vw); background: #1d2330; color: #fff;
+               font: 12.5px/1.45 system-ui, sans-serif; font-style: normal; font-weight: 400; padding: 10px 12px; border-radius: 8px; white-space: pre-line; text-align: left; }
+  .info .tip a { color: #7dd3fc; }
+  .info:hover .tip, .info:focus .tip, .info:focus-within .tip { display: block; }
+  @media (max-width: 860px) { .info .tip { position: fixed; left: 16px; right: 16px; top: auto; bottom: 16px; width: auto; } }
   .src-icon { font-size: 22px; line-height: 1; text-align: center; filter: drop-shadow(0 0 2px #fff); }
   .src-item { border-top: 1px solid var(--line); padding: 8px 0; font-size: 14px; }
   .src-item .meta { color: var(--muted); font-size: 12px; }
@@ -114,8 +121,33 @@
 </main>
 
 <script>
-/* H2S шекті мәні: 8 мкг/м³ (0,008 мг/м³) — ТЕКСЕРУ КЕРЕК ресми құжат бойынша */
-const LIMITS = { H2S: 8 };
+/* Шекті мәндер (ПДК), мкг/м³: ҚР ДСМ-70 бұйрығы, 1-қосымша (мг/м³ × 1000).
+   mr — ең жоғары бір реттік, ss — орташа тәуліктік, row — кестедегі жол нөмірі. */
+const LIMIT_DOC = {
+  title: 'ҚР Денсаулық сақтау министрінің 2022 жылғы 2 тамыздағы № ҚР ДСМ-70 бұйрығы, 1-қосымша «Қалалық және ауылдық елді мекендердің атмосфералық ауасындағы ластаушы заттардың шекті рұқсат етілген концентрациялары» (НҚА тізілімінде № 29011)',
+  url: 'https://adilet.zan.kz/rus/docs/V2200029011',
+};
+const LIMIT_TABLE = {
+  H2S:     { mr: 8,    ss: null, row: 518, name: 'Сероводород (Дигидросульфид)' },
+  NO2:     { mr: 200,  ss: 40,   row: 4,   name: 'Азота (IV) диоксид' },
+  NO:      { mr: 400,  ss: 60,   row: 6,   name: 'Азот (II) оксид' },
+  SO2:     { mr: 500,  ss: 50,   row: 516, name: 'Сера диоксид' },
+  CO:      { mr: 5000, ss: 3000, row: 584, name: 'Углерод оксид' },
+  O3:      { mr: 160,  ss: 30,   row: 435, name: 'Озон' },
+  NH3:     { mr: 200,  ss: 40,   row: 32,  name: 'Аммиак' },
+  PM10:    { mr: 300,  ss: 60,   row: 117, name: 'Взвешенные частицы РМ10' },
+  'PM2.5': { mr: 160,  ss: 35,   row: 118, name: 'Взвешенные частицы РМ2,5' },
+};
+const LIMITS = Object.fromEntries(Object.entries(LIMIT_TABLE).map(([k, v]) => [k, v.mr]));
+function limitInfo(p) {
+  const l = LIMIT_TABLE[p];
+  if (!l) return `${p} үшін шекті мән енгізілмеген.`;
+  return `${p}: ең жоғары бір реттік шекті мән ${l.mr} мкг/м³` + (l.ss ? `, орташа тәуліктік ${l.ss} мкг/м³` : '') +
+    `.
+Дереккөз: ${LIMIT_DOC.title}, ${l.row}-жол «${l.name}».` +
+    `
+Ескерту: бекеттер сағаттық мән береді, ал бір реттік шекті мән 20–30 минутқа арналған — салыстыру шамамен.`;
+}
 const LEVELS = [
   { max: 0.5, color: '#16a34a', label: 'шекті мәннің жартысына дейін' },
   { max: 1,   color: '#eab308', label: 'шекті мәнге жақын' },
@@ -211,7 +243,7 @@ function render() {
   renderAttribution();
 
   $('#legend').innerHTML = lim
-    ? `<b>${pollutant}, шекті мән ${lim} мкг/м³</b><span class="muted">шекті мән — тексеру керек</span>` + LEVELS.map(l => `<span><i style="background:${l.color}"></i>${l.label}</span>`).join('') + `<span><i style="background:${NO_DATA}"></i>бұл сағатта дерек жоқ</span>`
+    ? `<b>${pollutant}, шекті мән ${lim} мкг/м³ <span class="info" tabindex="0" aria-label="Дереккөз">i<span class="tip">${esc(limitInfo(pollutant))}<br><a href="${LIMIT_DOC.url}" target="_blank" rel="noopener">adilet.zan.kz ашу</a></span></span></b>` + LEVELS.map(l => `<span><i style="background:${l.color}"></i>${l.label}</span>`).join('') + `<span><i style="background:${NO_DATA}"></i>бұл сағатта дерек жоқ</span>`
     : `<b>${pollutant}</b><span class="muted">Шекті мән енгізілмеген — көк түспен</span>`;
 }
 
@@ -242,6 +274,7 @@ $('#play').onclick = () => {
 
 /* ===== Көзді анықтау: модель (model.js) + бекеттердегі фоннан артық мән ===== */
 const MIN_EXCESS = 2; // мкг/м³ — бұдан аз артықшылық шу деп есептеледі
+const MIN_EXPLAINED = 0.25; // ең жақсы көз артық мәннің кемінде 25%-ын түсіндірмесе — көз анықталмады деп жазамыз
 const plumeLayer = L.layerGroup().addTo(map);
 const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
 const weatherOf = h => { const w = wind[h]; return w && { dir: +w.wind_dir_deg, speed: +w.wind_speed_ms, rad: +w.radiation_wm2 || 0, cloud: +w.cloud_pct || 0 }; };
@@ -274,6 +307,12 @@ function renderAttribution() {
   }
   const { ranking } = AirModel.rankSources(sources, obs, weather);
   const best = ranking[0];
+  if (!best || best.explained < MIN_EXPLAINED) {
+    $('#attr').innerHTML = `<div class="muted">Бекеттерде ${pollutant} фоннан сәл жоғары (ең көбі +${maxEx.toFixed(1)} мкг/м³), бірақ тізімдегі бірде-бір көз
+      оны түсіндірмейді (ең жақсысы ${best ? (best.explained * 100).toFixed(0) : 0}%, керегі ≥ ${MIN_EXPLAINED * 100}%). Көз анықталмады:
+      бұл кездейсоқ ауытқу, жергілікті көз немесе тізімде жоқ көз болуы мүмкін.</div>` + clsLine;
+    return;
+  }
   $('#attr').innerHTML = ranking.filter(r => r.share > 0.005).map(r => `
       <div class="bar"><div>${KIND_ICON[r.source.kind] || '📍'} ${esc(r.source.name)} · ${r.source.height_m} м
         <div class="track"><div class="fill" style="width:${(r.share * 100).toFixed(0)}%"></div></div></div>
