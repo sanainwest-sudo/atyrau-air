@@ -1,23 +1,25 @@
-"""Сборщик: посты качества воздуха Атырауской области (карта Казгидромета ecodata.kz) + ветер (Open-Meteo).
+"""Сборщик: посты качества воздуха Атырауской области (карта Казгидромета ecodata.kz) + погода (Open-Meteo).
 
-Запуск раз в час. Дописывает новые строки в data/stations.csv и data/wind.csv, повторы пропускает.
+Запуск раз в час. ecodata.kz открывается только из Казахстана, поэтому:
+  ноутбук:  collect.py --only stations --log local.log --push   (посты → сразу в GitHub)
+  GitHub:   collect.py --only weather --log cloud.log            (погода)
 """
+import argparse
 import csv
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 STATIONS_CSV = DATA / "stations.csv"
 WIND_CSV = DATA / "wind.csv"
-LOG = DATA / "collect.log"
+LOG = DATA / "collect.log"  # меняется аргументом --log
 
 ECODATA_URL = "http://ecodata.kz:3838/app_dem_visual/"
 # Атырауская область с запасом (город, Кульсары, Тенгиз, Жанбай, Макат)
@@ -86,6 +88,8 @@ def append_rows(path, fields, rows):
 
 
 def fetch_stations():
+    from playwright.sync_api import sync_playwright  # нужен только для постов
+
     with sync_playwright() as p:
         browser = p.chromium.launch(channel=BROWSER_CHANNEL, headless=True)
         page = browser.new_page()
@@ -161,19 +165,56 @@ def collect_wind():
     return len(rows)
 
 
+def git(*args):
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # без всплывающих окон из планировщика
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                          creationflags=flags, timeout=120)
+
+
+def push(paths):
+    """Отправить новые данные в GitHub (чтобы страница в интернете их видела)."""
+    git("add", *[str(p.relative_to(ROOT)) for p in paths])
+    if git("diff", "--cached", "--quiet").returncode == 0:
+        return "нет изменений"
+    git("commit", "-m", f"Посты {datetime.now(ATYRAU_TZ):%Y-%m-%d %H:%M}")
+    pull = git("pull", "--rebase", "-q")
+    if pull.returncode != 0:
+        git("rebase", "--abort")
+        return f"ОШИБКА pull: {pull.stderr.strip()[:300]}"
+    res = git("push", "-q")
+    return "отправлено" if res.returncode == 0 else f"ОШИБКА push: {res.stderr.strip()[:300]}"
+
+
 def main():
+    global LOG
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", choices=["all", "stations", "weather"], default="all")
+    ap.add_argument("--log", default="collect.log")
+    ap.add_argument("--push", action="store_true", help="после сбора отправить данные в GitHub")
+    a = ap.parse_args()
+    LOG = DATA / a.log
     ok = True
-    try:
-        n_points, n_rows = collect_stations()
-        log(f"посты: {n_points} точек, новых строк {n_rows}")
-    except Exception as e:
-        ok = False
-        log(f"ОШИБКА посты: {e!r}")
-    try:
-        log(f"погода: часов в файле {collect_wind()}")
-    except Exception as e:
-        ok = False
-        log(f"ОШИБКА ветер: {e!r}")
+    if a.only in ("all", "stations"):
+        try:
+            n_points, n_rows = collect_stations()
+            log(f"посты: {n_points} точек, новых строк {n_rows}")
+        except Exception as e:
+            ok = False
+            log(f"ОШИБКА посты: {e!r}")
+    if a.only in ("all", "weather"):
+        try:
+            log(f"погода: часов в файле {collect_wind()}")
+        except Exception as e:
+            ok = False
+            log(f"ОШИБКА погода: {e!r}")
+    if a.push:
+        try:
+            r = push([STATIONS_CSV, LOG])
+            log(f"github: {r}")
+            ok = ok and not r.startswith("ОШИБКА")
+        except Exception as e:
+            ok = False
+            log(f"ОШИБКА github: {e!r}")
     sys.exit(0 if ok else 1)
 
 
