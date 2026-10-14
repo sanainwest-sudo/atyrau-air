@@ -36,6 +36,14 @@
     return u10 < 3 ? 'F' : u10 < 5 ? 'E' : 'D';
   }
 
+  // начальная ширина факела: площадной источник размером size_m (большой пруд) — size/4,
+  // наземный без размера (очистные) — 100 м, труба — 0
+  function initialWidth(src) {
+    const size = +src.size_m || 0;
+    if (size > 0) return size / 4;
+    return (+src.height_m || 0) < 5 ? 100 : 0;
+  }
+
   // метры относительно точки (lat0, lng0): x — на восток, y — на север
   function toMeters(lat, lng, lat0, lng0) {
     return [(lng - lng0) * 111320 * Math.cos(lat0 * Math.PI / 180), (lat - lat0) * 110540];
@@ -54,7 +62,7 @@
     const u = Math.max(0.5, u10 * Math.pow(Math.max(H, 10) / 10, WIND_EXP[cls]));
     let [sy, sz] = BRIGGS[cls](x);
     sy = Math.hypot(sy, x * MEANDER);     // за час факел «гуляет» шире, чем 10-минутный σy Бриггса
-    if (H < 5) sy = Math.hypot(sy, 100); // наземный площадной источник (пруд, очистные) — начальная ширина ~100 м
+    sy = Math.hypot(sy, initialWidth(src));
     return Math.exp(-(y * y) / (2 * sy * sy)) * Math.exp(-(H * H) / (2 * sz * sz)) / (Math.PI * u * sy * sz);
   }
 
@@ -93,7 +101,7 @@
     for (let x = 0; x <= maxKm * 1000; x += 250) {
       let [sy] = x > 0 ? BRIGGS[cls](x) : [0];
       sy = Math.hypot(sy, x * MEANDER);
-      if ((+src.height_m || 0) < 5) sy = Math.hypot(sy, 100);
+      sy = Math.hypot(sy, initialWidth(src));
       const w = 2 * sy;
       const cx = x * dx, cy = x * dy;
       left.push([src.lat + (cy + w * dx) * ky, src.lng + (cx - w * dy) * kx]);
