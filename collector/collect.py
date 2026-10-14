@@ -22,8 +22,8 @@ WIND_CSV = DATA / "wind.csv"
 LOG = DATA / "collect.log"  # меняется аргументом --log
 
 ECODATA_URL = "http://ecodata.kz:3838/app_dem_visual/"
-# Атырауская область с запасом (город, Кульсары, Тенгиз, Жанбай, Макат)
-BBOX = {"lat_min": 45.5, "lat_max": 48.5, "lng_min": 50.0, "lng_max": 55.0}
+# Атырауская область с запасом (город, Кульсары, Тенгиз, Жанбай, Макат, Ганюшкино)
+BBOX = {"lat_min": 45.5, "lat_max": 48.5, "lng_min": 48.5, "lng_max": 55.0}  # 48.5 — Ганюшкино (Құрманғазы ауданы)
 # Ветер берём над центром Атырау
 WIND_POINT = (47.11, 51.92)
 ATYRAU_TZ = timezone(timedelta(hours=5))  # Казахстан UTC+5; сервер GitHub работает в UTC

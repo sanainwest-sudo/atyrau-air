@@ -200,7 +200,8 @@ function ownerOf(name) {
 }
 /* «Тұрып қалған» мән: бір сан STALE_RUN және одан көп сағат қатарынан өзгермесе (және ≥ STALE_MIN) — нақты өлшем емес деп санаймыз.
    Себебі: ecodata картасы ескі мәнді де көрсете береді; AirKz қосымшасы мұндай мәнді көрсетпейді (Мирный H2S/SO2, 14.10 22:00). */
-const STALE_RUN = 6, STALE_MIN = 3, ALIVE_HOURS = 12;
+// STALE_MIN = 6: ecodata бүтінге дөңгелектейді, 3–5 сияқты төмен мәндер шын өзгерсе де бірдей көрінеді (ТШО NO2: қосымшада 3.1/3.9)
+const STALE_RUN = 6, STALE_MIN = 6, ALIVE_HOURS = 12;
 // Романның ережесі: өлшемде қозғалыс болса — алып тастамаймыз. Тегіс кесінді тек оның алдындағы және кейінгі
 // ALIVE_HOURS сағат ішінде мән бірде-бір рет өзгермесе ғана «тұрып қалған» деп саналады.
 const hourMs = h => Date.parse(h.replace(' ', 'T') + ':00:00Z');
@@ -218,8 +219,11 @@ function markStale(series) {
   }
   return stale;
 }
-// таза мән (тұрып қалған мән болса — null)
-const val = (s, p, h) => { const v = s.data[p]?.[h]; return v == null || s.stale[p]?.has(h) ? null : v; };
+// CO бірлігі күмәнді: кейбір ЛББ бекеттері (№12, 15, 17, 19) 0.1–4 береді, қалғандары 90–1100 — мг/м³ болуы мүмкін (ТЕКСЕРУ).
+// Мұндай CO талдауға кірмейді. Ереже: бекеттің CO медианасы < 10.
+const unitDoubt = (s, p) => { const v = Object.values(s.data.CO || {}); return p === 'CO' && v.length > 0 && median(v) < 10; };
+// таза мән (тұрып қалған немесе бірлігі күмәнді болса — null)
+const val = (s, p, h) => { const v = s.data[p]?.[h]; return v == null || s.stale[p]?.has(h) || unitDoubt(s, p) ? null : v; };
 
 async function init() {
   const [rows, windRows] = await Promise.all([loadCsv('data/stations.csv'), loadCsv('data/wind.csv')]);
@@ -236,6 +240,11 @@ async function init() {
     hourSet.add(h);
   }
   for (const st of Object.values(stations)) for (const p in st.data) st.stale[p] = markStale(st.data[p]);
+  // аттас бекеттер (мысалы, «ПНЗ №1» — Жанбай және Мақат): атына елді мекенді қосамын
+  const byName = {};
+  for (const st of Object.values(stations)) (byName[st.name] ??= []).push(st);
+  for (const list of Object.values(byName)) if (list.length > 1)
+    for (const st of list) st.name += ' · ' + (st.address.replace(/^(с|п)\.\s*/, '').split(',')[0].trim() || `${st.lat.toFixed(2)}, ${st.lng.toFixed(2)}`);
   for (const w of windRows) wind[w.time_local.replace('T', ' ').slice(0, 13)] = w;
   // шкала — барлық сағаттар қатарынан, бос сағаттар да
   const sorted = [...hourSet].sort();
@@ -274,6 +283,7 @@ function render() {
         dashArray: stuck ? '3 2' : null, fillColor: colorFor(v), fillOpacity: v == null ? .5 : .9 })
       .bindTooltip(stuck ? `⚠${raw}` : v == null ? esc(s.name) : String(v), { permanent: raw != null, direction: 'center', className: 'station-label' })
       .bindPopup(`<b>${esc(s.name)}</b>${s.owner ? ` · ${s.owner}` : ''}<br>${esc(s.address)}<br>${pollutant}: <b>${raw ?? 'дерек жоқ'}</b> мкг/м³` +
+        (unitDoubt(s, pollutant) ? `<br>⚠ CO бірлігі күмәнді (мг/м³ болуы мүмкін, басқа бекеттер мкг/м³) — талдауға кірмейді.` : '') +
         (stuck ? `<br>⚠ Бұл мән ${STALE_RUN}+ сағат бойы өзгермеген және ±${ALIVE_HOURS} сағатта бірде-бір рет қозғалмаған — датчик тұрып қалған немесе ескі мән. Талдауға кірмейді.`
                : lim && v != null ? ` (${(v / lim).toFixed(1)} × шекті мән)` : ''))
       .on('click', () => { selected = s; renderChart(); })
