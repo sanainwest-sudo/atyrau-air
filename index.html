@@ -342,7 +342,7 @@ function renderChart() {
   chart?.destroy();
   chart = new Chart($('#chart'), {
     type: 'line',
-    data: { labels: hours.map(h => h.slice(8, 10) + '.' + h.slice(5, 7) + ' ' + h.slice(11)),
+    data: { labels: hours.map(h => h.slice(8, 10) + '.' + h.slice(5, 7) + ' ' + h.slice(11) + ':00'),
       datasets: [
         { label: pollutant, data: hours.map(h => val(selected, pollutant, h)), borderColor: '#0f766e', spanGaps: true, pointRadius: 2 },
         { label: '⚠ өзгермеген мән', data: hours.map(h => selected.stale[pollutant]?.has(h) ? series[h] : null), borderColor: '#9ca3af', backgroundColor: '#9ca3af', showLine: false, pointRadius: 3 },
