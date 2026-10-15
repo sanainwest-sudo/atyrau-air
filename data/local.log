@@ -62,3 +62,6 @@ error: Please commit or stash them.
 2026-10-15 08:10:15 github: отправлено
 2026-10-15 09:10:03 посты: повтор после ошибки Error('Page.goto: net::ERR_NAME_NOT_RESOLVED at http://ecodata.kz:3838/app_dem_visual/\nCall log:\n  - navigating to "http://ecodata.kz:3838/app_dem_visual/", waiting until "load"\n')
 2026-10-15 09:10:04 ОШИБКА посты: Error('Page.goto: net::ERR_NAME_NOT_RESOLVED at http://ecodata.kz:3838/app_dem_visual/\nCall log:\n  - navigating to "http://ecodata.kz:3838/app_dem_visual/", waiting until "load"\n')
+2026-10-15 09:10:05 github: ОШИБКА pull: fatal: unable to access 'https://github.com/sanainwest-sudo/atyrau-air.git/': Could not resolve host: github.com
+2026-10-15 10:10:03 посты: повтор после ошибки Error('Page.goto: net::ERR_NAME_NOT_RESOLVED at http://ecodata.kz:3838/app_dem_visual/\nCall log:\n  - navigating to "http://ecodata.kz:3838/app_dem_visual/", waiting until "load"\n')
+2026-10-15 10:10:04 ОШИБКА посты: Error('Page.goto: net::ERR_NAME_NOT_RESOLVED at http://ecodata.kz:3838/app_dem_visual/\nCall log:\n  - navigating to "http://ecodata.kz:3838/app_dem_visual/", waiting until "load"\n')
