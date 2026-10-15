@@ -319,13 +319,13 @@ function render() {
   $('#top').innerHTML = list.slice(0, 6).map(x => `<li>${esc(x.s.name)}${x.s.owner ? ` <span class="muted">(${x.s.owner})</span>` : ''} — <b>${x.v}</b></li>`).join('') || '<span class="muted">Бұл сағатта дерек жоқ</span>';
   [...$('#top').children].forEach((li, i) => li.onclick = () => { selected = list[i].s; map.setView([selected.lat, selected.lng], 14); renderChart(); });
 
-  const w = wind[h];
+  const wf = windFor(h), w = wf?.w;
   if (w) {
     const deg = +w.wind_dir_deg;
     // метеорологиялық бағыт — жел ҚАЙДАН соғады; бағдарша — ҚАЙДА соғады
     $('#arrowG').setAttribute('transform', `rotate(${deg + 180})`);
     $('#windText').textContent = `Жел ${DIRS[Math.round(deg / 45) % 8]}, ${(+w.wind_speed_ms).toFixed(1)} м/с`;
-    $('#windSub').textContent = `${Math.round(deg)}°, екпіні ${(+w.wind_gust_ms).toFixed(1)} м/с · Open-Meteo`;
+    $('#windSub').textContent = `${Math.round(deg)}°, екпіні ${(+w.wind_gust_ms).toFixed(1)} м/с · Open-Meteo` + (wf.lag ? ` · ⏳ ${wf.lag} сағат бұрынғы (жаңасы ~:30-да келеді)` : '');
   } else { $('#windText').textContent = 'Жел: дерек жоқ'; $('#windSub').textContent = ''; }
   renderAttribution();
 
@@ -365,7 +365,15 @@ const MIN_EXCESS = 2; // мкг/м³ — бұдан аз артықшылық ш
 const MIN_EXPLAINED = 0.25; // ең жақсы көз артық мәннің кемінде 25%-ын түсіндірмесе — көз анықталмады деп жазамыз
 const plumeLayer = L.layerGroup().addTo(map);
 const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
-const weatherOf = h => { const w = wind[h]; return w && { dir: +w.wind_dir_deg, speed: +w.wind_speed_ms, rad: +w.radiation_wm2 || 0, cloud: +w.cloud_pct || 0 }; };
+// Ветер часа h; если его ещё нет (погода приходит из облака ~в :30, посты — в :10) — берём последний известный до 2 ч назад.
+function windFor(h) {
+  for (let lag = 0; lag <= 2; lag++) {
+    const t = new Date(Date.parse(h.replace(' ', 'T') + ':00:00Z') - lag * 36e5).toISOString().slice(0, 13).replace('T', ' ');
+    if (wind[t]) return { w: wind[t], lag };
+  }
+  return null;
+}
+const weatherOf = h => { const w = windFor(h)?.w; return w && { dir: +w.wind_dir_deg, speed: +w.wind_speed_ms, rad: +w.radiation_wm2 || 0, cloud: +w.cloud_pct || 0 }; };
 
 function renderAttribution() {
   plumeLayer.clearLayers();
