@@ -98,6 +98,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def end_headers(self):
+        # Браузер ескі нұсқаны көрсетпесін: әр өзгеріс бірден көрінеді
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+
     def do_GET(self):
         # .env және жасырын файлдарды бермейміз
         if any(part.startswith('.') for part in self.path.split('?')[0].split('/')):
