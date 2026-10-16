@@ -114,3 +114,49 @@ test('площадной источник (Сасық сай): ближний к
   const { ranking } = rankSources([...SOURCES, pond], synth(pond, hours), hours);
   assert.equal(ranking[0].source.id, 'tukhlaya', ranking.map(r => `${r.source.id}:${r.explained.toFixed(2)}`).join(' '));
 });
+
+// ---- Құбыр түтінінің көтерілуі (Бриггс) және температураны салмақтау ----
+const { plumeRise, localTemp } = globalThis.AirModel;
+const STACK = { d_m: 6.6, v_ms: 2.29, ts_c: 130 }; // АТЭЦ №4 (НДВ)
+
+test('көтерілу: stack немесе Ta жоқ болса — 0', () => {
+  assert.strictEqual(plumeRise(undefined, 10, 5, 'D', 1000), 0);
+  assert.strictEqual(plumeRise(STACK, undefined, 5, 'D', 1000), 0);
+  assert.strictEqual(plumeRise({ ...STACK, ts_c: 5 }, 10, 5, 'D', 1000), 0); // газ ауадан суық
+});
+
+test('көтерілу: қашықтықпен өседі, содан соң шектік мәнде тұрақталады', () => {
+  const a = plumeRise(STACK, 10, 5, 'D', 100), b = plumeRise(STACK, 10, 5, 'D', 300);
+  const c = plumeRise(STACK, 10, 5, 'D', 40000), d = plumeRise(STACK, 10, 5, 'D', 80000);
+  assert.ok(a > 0 && b > a && c >= b); // 300 м-де әлі өсіп жатыр, 40 км-де шекке жеткен
+  assert.strictEqual(c, d);
+});
+
+test('көтерілу: газ ыстық болған сайын көп, тұрақты түнде (F) бейтараптан аз', () => {
+  assert.ok(plumeRise({ ...STACK, ts_c: 160 }, 10, 5, 'D', 5000) > plumeRise(STACK, 10, 5, 'D', 5000));
+  assert.ok(plumeRise(STACK, 10, 3, 'F', 40000) < plumeRise(STACK, 10, 3, 'D', 40000));
+});
+
+test('stack жоқ көз Ta-ға тәуелсіз: нәтиже өзгермейді', () => {
+  const src = { lat: 47.0, lng: 52.0, height_m: 60 };
+  const rcp = { lat: 47.0, lng: 52.0 + 2000 / (111320 * Math.cos(47 * Math.PI / 180)) };
+  assert.strictEqual(plumeAt(src, rcp, 270, 4, 'D'), plumeAt(src, rcp, 270, 4, 'D', 10));
+});
+
+test('ыстық құбыр: жақын қашықтықта жерге түсетін концентрация азаяды', () => {
+  const base = { lat: 47.0, lng: 52.0, height_m: 120 };
+  const rcp = { lat: 47.0, lng: 52.0 + 1000 / (111320 * Math.cos(47 * Math.PI / 180)) };
+  const plain = plumeAt(base, rcp, 270, 5, 'D', 10);
+  const hot = plumeAt({ ...base, stack: STACK }, rcp, 270, 5, 'D', 10);
+  assert.ok(hot < plain);
+});
+
+test('localTemp: жақын бекеттің салмағы көп; бекет жоқ болса — fallback', () => {
+  const p = { lat: 47.0, lng: 52.0 };
+  const near = { lat: 47.0, lng: 52.0 + 2000 / (111320 * Math.cos(47 * Math.PI / 180)), temp: 20 };
+  const far = { lat: 47.0, lng: 52.0 + 8000 / (111320 * Math.cos(47 * Math.PI / 180)), temp: 30 };
+  const t = localTemp(p, [near, far], 15);
+  assert.ok(t > 20 && t < 21); // 1/d²: 16 : 1 → ≈ 20,6
+  assert.strictEqual(localTemp(p, [], 15), 15);
+  assert.strictEqual(localTemp(p, [{ ...near, temp: null }], 15), 15);
+});

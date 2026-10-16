@@ -45,6 +45,39 @@
     return (+src.height_m || 0) < 5 ? 100 : 0;
   }
 
+  const G = 9.81;
+  // Тұрақты кластарда потенциалды температураның градиенті (К/м). Бір деңгейлі өлшем болғандықтан нақты градиент жоқ — класқа қарай қабылданады
+  const DTHETA = { E: 0.02, F: 0.035 };
+
+  /** Ыстық құбыр түтінінің көтерілуі Δh(x), м (Бриггс). stack = { d_m, v_ms, ts_c } — НДВ параметрлері.
+   *  u — құбыр биіктігіндегі жел (м/с), Ta — қоршаған ауа (°C), x — құбырдан қашықтық (м).
+   *  Ta немесе stack жоқ болса, көтерілу 0 — модель бұрынғыша жұмыс істейді. */
+  function plumeRise(stack, Ta, u, cls, x) {
+    if (!stack || !(stack.d_m > 0) || !(stack.v_ms > 0) || stack.ts_c == null || Ta == null || !isFinite(Ta)) return 0;
+    const Ts = stack.ts_c + 273.15, Tk = Ta + 273.15;
+    if (Ts <= Tk) return 0; // газ суық болса, көтерілмейді
+    const F = G * stack.v_ms * stack.d_m * stack.d_m / 4 * (Ts - Tk) / Ts; // көтеру күшінің ағыны, м⁴/с³
+    const growing = 1.6 * Math.cbrt(F) * Math.pow(Math.max(x, 0), 2 / 3) / u; // қашықтықпен өсетін көтерілу
+    let final; // соңғы (шектік) көтерілу
+    if (DTHETA[cls]) final = 2.6 * Math.cbrt(F / (u * (G / Tk * DTHETA[cls])));
+    else final = (F < 55 ? 21.425 * Math.pow(F, 0.75) : 38.71 * Math.pow(F, 0.6)) / u;
+    return Math.min(growing, final);
+  }
+
+  /** Көз маңындағы ауа температурасы: бекеттердің мәндері 1/d² салмағымен орташаланады.
+   *  stations: [{ lat, lng, temp }] — температурасы бар бекеттер. Біреуі де жоқ болса — fallback (Open-Meteo).
+   *  Қашықтық 500 м-ден кіші болса, 500 м деп алынады — бір бекет бәрін басып кетпесін. */
+  function localTemp(point, stations, fallback) {
+    let sw = 0, st = 0;
+    for (const s of stations || []) {
+      if (s.temp == null || !isFinite(s.temp)) continue;
+      const [ex, ny] = toMeters(s.lat, s.lng, point.lat, point.lng);
+      const w = 1 / Math.max(500, Math.hypot(ex, ny)) ** 2;
+      sw += w; st += w * s.temp;
+    }
+    return sw > 0 ? st / sw : fallback;
+  }
+
   // метры относительно точки (lat0, lng0): x — на восток, y — на север
   function toMeters(lat, lng, lat0, lng0) {
     return [(lng - lng0) * 111320 * Math.cos(lat0 * Math.PI / 180), (lat - lat0) * 110540];
@@ -81,15 +114,15 @@
 
   /** Относительная концентрация у земли в точке приёмника от источника (точечного или площадного).
    *  windFromDeg — откуда дует ветер (метеорологический угол). */
-  function plumeAt(src, rcp, windFromDeg, u10, cls) {
-    if (!Array.isArray(src.area) || !src.area.length) return plumePoint(src, rcp, windFromDeg, u10, cls);
+  function plumeAt(src, rcp, windFromDeg, u10, cls, Ta) {
+    if (!Array.isArray(src.area) || !src.area.length) return plumePoint(src, rcp, windFromDeg, u10, cls, Ta);
     const pts = areaPoints(src.area);
     let sum = 0;
-    for (const [lat, lng] of pts) sum += plumePoint({ lat, lng, height_m: src.height_m, width_m: AREA_STEP / 2 }, rcp, windFromDeg, u10, cls);
+    for (const [lat, lng] of pts) sum += plumePoint({ lat, lng, height_m: src.height_m, width_m: AREA_STEP / 2 }, rcp, windFromDeg, u10, cls, Ta);
     return sum / pts.length;
   }
 
-  function plumePoint(src, rcp, windFromDeg, u10, cls) {
+  function plumePoint(src, rcp, windFromDeg, u10, cls, Ta) {
     const [ex, ny] = toMeters(rcp.lat, rcp.lng, src.lat, src.lng);
     const to = (windFromDeg + 180) * Math.PI / 180; // направление, куда дует
     const dx = Math.sin(to), dy = Math.cos(to);
@@ -101,7 +134,8 @@
     let [sy, sz] = BRIGGS[cls](x);
     sy = Math.hypot(sy, x * MEANDER);     // за час факел «гуляет» шире, чем 10-минутный σy Бриггса
     sy = Math.hypot(sy, initialWidth(src));
-    return Math.exp(-(y * y) / (2 * sy * sy)) * Math.exp(-(H * H) / (2 * sz * sz)) / (Math.PI * u * sy * sz);
+    const He = H + plumeRise(src.stack, Ta, u, cls, x); // түтін көтерілгеннен кейінгі тиімді биіктік
+    return Math.exp(-(y * y) / (2 * sy * sy)) * Math.exp(-(He * He) / (2 * sz * sz)) / (Math.PI * u * sy * sz);
   }
 
   /** Рейтинг источников.
@@ -116,7 +150,7 @@
       let em = 0, mm = 0;
       const m = rows.map(o => {
         const w = weather[o.hour];
-        const v = plumeAt(s, o.station, w.dir, w.speed, stabilityClass(w.speed, w.rad, w.cloud));
+        const v = plumeAt(s, o.station, w.dir, w.speed, stabilityClass(w.speed, w.rad, w.cloud), w.temp);
         em += o.excess * v; mm += v * v;
         return v;
       });
@@ -148,5 +182,5 @@
     return [...left, ...right.reverse()];
   }
 
-  globalThis.AirModel = { stabilityClass, plumeAt, rankSources, plumeOutline, areaPoints, NAMES };
+  globalThis.AirModel = { stabilityClass, plumeAt, plumeRise, localTemp, rankSources, plumeOutline, areaPoints, NAMES };
 })();
