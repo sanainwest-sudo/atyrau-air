@@ -160,3 +160,14 @@ test('localTemp: жақын бекеттің салмағы көп; бекет �
   assert.strictEqual(localTemp(p, [], 15), 15);
   assert.strictEqual(localTemp(p, [{ ...near, temp: null }], 15), 15);
 });
+
+test('riseAt: stack жоқ көзге 0, бар көзге оң; бекет температурасы Open-Meteo-дан басымдау', () => {
+  const { riseAt } = globalThis.AirModel;
+  const src = { lat: 47.0, lng: 52.0, height_m: 180 };
+  const w = { speed: 5, rad: 0, cloud: 100, temp: 10 };
+  assert.strictEqual(riseAt(src, w, 5000), 0);
+  assert.ok(riseAt({ ...src, stack: STACK }, w, 5000) > 0);
+  // бекет 30 °C көрсетсе, түтін мен ауа айырмасы азаяды → көтерілу кемиді
+  const hotAir = { ...w, stationTemps: [{ lat: 47.0, lng: 52.01, temp: 30 }] };
+  assert.ok(riseAt({ ...src, stack: STACK }, hotAir, 5000) < riseAt({ ...src, stack: STACK }, w, 5000));
+});

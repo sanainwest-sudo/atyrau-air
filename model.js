@@ -150,7 +150,8 @@
       let em = 0, mm = 0;
       const m = rows.map(o => {
         const w = weather[o.hour];
-        const v = plumeAt(s, o.station, w.dir, w.speed, stabilityClass(w.speed, w.rad, w.cloud), w.temp);
+        // Ta — көзге жақын бекеттердің температурасы (1/d²), жоқ болса — Open-Meteo (w.temp)
+        const v = plumeAt(s, o.station, w.dir, w.speed, stabilityClass(w.speed, w.rad, w.cloud), localTemp(s, w.stationTemps, w.temp));
         em += o.excess * v; mm += v * v;
         return v;
       });
@@ -162,6 +163,14 @@
     const sum = result.reduce((a, r) => a + r.explained, 0);
     result.forEach(r => r.share = sum > 0 ? r.explained / sum : 0);
     return { ranking: result.sort((a, b) => b.explained - a.explained), total, n: rows.length };
+  }
+
+  /** Көздің түтіні x метр қашықтықта қанша метрге көтерілетіні (бетте көрсету үшін). w — { speed, rad, cloud, temp, stationTemps } */
+  function riseAt(src, w, x) {
+    const cls = stabilityClass(w.speed, w.rad, w.cloud);
+    const H = Math.max(0, +src.height_m || 0);
+    const u = Math.max(0.5, w.speed * Math.pow(Math.max(H, 10) / 10, WIND_EXP[cls]));
+    return plumeRise(src.stack, localTemp(src, w.stationTemps, w.temp), u, cls, x);
   }
 
   /** Контур факела для карты: точки [lat,lng] по краям ±2σy до maxKm */
@@ -182,5 +191,5 @@
     return [...left, ...right.reverse()];
   }
 
-  globalThis.AirModel = { stabilityClass, plumeAt, plumeRise, localTemp, rankSources, plumeOutline, areaPoints, NAMES };
+  globalThis.AirModel = { stabilityClass, plumeAt, plumeRise, riseAt, localTemp, rankSources, plumeOutline, areaPoints, NAMES };
 })();
