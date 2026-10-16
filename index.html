@@ -152,6 +152,10 @@
         <p><b>5. Көзді анықтау.</b> Әр бекеттің өз фонынан (медиана) артық мәні алынады. Әр көз үшін модель «бұл көз болса, бекеттерде қандай сурет болар еді» деп есептейді,
           ең кіші квадраттар әдісімен сәйкестендіріледі. Нәтиже — көздің артық мәннің неше пайызын түсіндіретіні. 25%-дан аз болса — «көз анықталмады».
           Тексерілді: жасанды шығарылыммен 10 тест (көзді табады, бір нүктедегі жер деңгейі мен 60 м құбырды ажыратады).</p>
+        <p><b>4а. Ыстық құбыр түтінінің көтерілуі.</b> Құбырдан шыққан газ ауадан жылы болса, көтеріледі (Бриггс): H<sub>тиімді</sub> = H + Δh, мұнда Δh = 1,6·F<sup>⅓</sup>·x<sup>⅔</sup>/u (қашықтықпен өседі)
+          және тұрақты түнде 2,6·(F/(u·S))<sup>⅓</sup>, басқа кезде 21,4·F<sup>¾</sup>/u (F &lt; 55) немесе 38,7·F<sup>0,6</sup>/u шегінен аспайды. F — көтеру күшінің ағыны (құбыр диаметрі, газ жылдамдығы, газ бен ауа температурасының айырмасы).
+          Құбыр параметрлері — НДВ-дан (қазір АТЭЦ №4 және №2); АНПЗ факелі үшін газ температурасы белгісіз, сондықтан көтерілу есептелмейді.
+          Ауа температурасы — көзге жақын Қазгидромет бекеттерінің мәндері (1/d² салмағымен), жоқ болса — Open-Meteo. Инверсияны анықтауға бір деңгейлі өлшем жеткіліксіз, сондықтан тұрақтылық класы бұрынғыша жел, радиация, бұлттылықтан алынады.</p>
         <p><b>5а. Жету уақыты.</b> Көзден бекетке дейінгі қашықтық ÷ сол сағаттағы жел жылдамдығы (тоған үшін — ең жақын шетінен). Қарапайым баға: ауа желмен бірге түзу жүреді деп есептеледі.</p>
         <p><b>6. Тұрақты жоғары бекеттер.</b> Модель «секірістерді» іздейді, ал бекет жанындағы тұрақты көзді фон деп қабылдайды. Сондықтан бөлек тексеру: бекет кезеңнің ≥ 80% сағатында қала бекеттерінің медианасынан жоғары ма.</p>
         <p><b>7. Жел розасы және сызықтар.</b> Артық мән болған бекеттен (немесе шағым нүктесінен) жел келген жаққа сызық; сызықтар тоғысқан жер — ықтимал көз.
@@ -204,7 +208,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const loadCsv = url => new Promise((ok, err) => Papa.parse(url + '?t=' + Date.now(), { download: true, header: true, skipEmptyLines: true, complete: r => ok(r.data), error: err }));
 
-let stations = {}, hours = [], wind = {}, pollutant = 'H2S', idx = 0, chart, selected = null, timer = null;
+let stations = {}, hours = [], wind = {}, kgmTemps = {}, pollutant = 'H2S', idx = 0, chart, selected = null, timer = null;
 const map = L.map('map').setView([47.11, 51.92], 12);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 const layer = L.layerGroup().addTo(map);
@@ -252,7 +256,7 @@ const unitDoubt = (s, p) => { const v = Object.values(s.data.CO || {}); return p
 const val = (s, p, h) => { const v = s.data[p]?.[h]; return v == null || s.stale[p]?.has(h) || unitDoubt(s, p) ? null : v; };
 
 async function init() {
-  const [rows, windRows] = await Promise.all([loadCsv('data/stations.csv'), loadCsv('data/wind.csv')]);
+  const [rows, windRows, kgmRows] = await Promise.all([loadCsv('data/stations.csv'), loadCsv('data/wind.csv'), loadCsv('data/kgm.csv').catch(() => [])]);
   // только почасовые замеры; ручные посты (одна дата в сутки) в почасовой шкале не участвуют
   const hourSet = new Set();
   for (const r of rows) {
@@ -272,6 +276,11 @@ async function init() {
   for (const list of Object.values(byName)) if (list.length > 1)
     for (const st of list) st.name += ' · ' + (st.address.replace(/^(с|п)\.\s*/, '').split(',')[0].trim() || `${st.lat.toFixed(2)}, ${st.lng.toFixed(2)}`);
   for (const w of windRows) wind[w.time_local.replace('T', ' ').slice(0, 13)] = w;
+  // Қазгидромет бекеттерінің температурасы (tabigat): сағат → { бекет id → {lat, lng, temp} }; сол сағатта жоқ болса, Open-Meteo алынады
+  for (const r of kgmRows) {
+    if (r.param !== 'temp' || !isFinite(+r.value)) continue;
+    ((kgmTemps[r.measured_at.slice(0, 13)] ??= {})[r.station_id] = { lat: +r.lat, lng: +r.lng, temp: +r.value });
+  }
   // шкала — барлық сағаттар қатарынан, бос сағаттар да
   const sorted = [...hourSet].sort();
   hours = [];
@@ -373,7 +382,13 @@ function windFor(h) {
   }
   return null;
 }
-const weatherOf = h => { const w = windFor(h)?.w; return w && { dir: +w.wind_dir_deg, speed: +w.wind_speed_ms, rad: +w.radiation_wm2 || 0, cloud: +w.cloud_pct || 0 }; };
+const weatherOf = h => {
+  const w = windFor(h)?.w;
+  if (!w) return null;
+  const temp = w.temp_c === '' || w.temp_c == null ? undefined : +w.temp_c; // wind.csv-те температура жоқ ескі жолдар болуы мүмкін
+  return { dir: +w.wind_dir_deg, speed: +w.wind_speed_ms, rad: +w.radiation_wm2 || 0, cloud: +w.cloud_pct || 0,
+    temp, stationTemps: Object.values(kgmTemps[h] || {}) };
+};
 
 function renderAttribution() {
   plumeLayer.clearLayers();
@@ -437,7 +452,9 @@ function travelLine(src, obs, w) {
   const km = Math.min(...sourcePoints(src).map(([a, o]) => Math.hypot((a - st.lat) * 110.54, (o - st.lng) * 111.32 * Math.cos(st.lat * Math.PI / 180))));
   const min = km * 1000 / Math.max(0.5, w.speed) / 60;
   const t = min < 90 ? `≈ ${Math.round(min)} мин` : `≈ ${(min / 60).toFixed(1)} сағ`;
-  return `<div class="muted" style="margin-top:4px">⏱ ${esc(src.name)} → ${esc(st.name)} (${h.slice(11)}:00-дегі ең үлкен артық): ${t} (${km.toFixed(1)} км, жел ${w.speed.toFixed(1)} м/с).</div>`;
+  const dh = AirModel.riseAt(src, w, km * 1000); // ыстық құбыр түтінінің көтерілуі (Бриггс), м
+  const rise = dh > 0 ? `<br>🔥 Түтін шамамен ${Math.round(dh)} м көтеріледі (құбыр ${src.stack.ts_c} °C, ауа ${(AirModel.localTemp(src, w.stationTemps, w.temp) ?? 0).toFixed(0)} °C) → тиімді биіктік ≈ ${Math.round(src.height_m + dh)} м.` : '';
+  return `<div class="muted" style="margin-top:4px">⏱ ${esc(src.name)} → ${esc(st.name)} (${h.slice(11)}:00-дегі ең үлкен артық): ${t} (${km.toFixed(1)} км, жел ${w.speed.toFixed(1)} м/с).${rise}</div>`;
 }
 
 /* ===== Жел розасы + талдау сызықтары (бекеттен желге қарсы) ===== */
