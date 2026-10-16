@@ -2,3 +2,6 @@
 __pycache__/
 memory-bank/
 app/
+.env
+tmp-test/
+nace-test/
