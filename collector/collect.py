@@ -33,7 +33,7 @@ ATYRAU_TZ = timezone(timedelta(hours=5))  # Казахстан UTC+5; серве
 BROWSER_CHANNEL = os.environ.get("BROWSER_CHANNEL", "msedge" if os.name == "nt" else "") or None
 
 STATION_FIELDS = ["fetched_at_utc", "station", "address", "lat", "lng", "measured_at", "pollutant", "value"]
-WIND_FIELDS = ["time_local", "wind_dir_deg", "wind_speed_ms", "wind_gust_ms", "radiation_wm2", "cloud_pct"]
+WIND_FIELDS = ["time_local", "wind_dir_deg", "wind_speed_ms", "wind_gust_ms", "radiation_wm2", "cloud_pct", "temp_c"]
 WEATHER_START = "2026-10-12"  # погода нужна с начала сбора постов (с запасом)
 
 # tabigat.gov.kz (портал Минэкологии): слой «Состояние атмосферного воздуха» — посты Казгидромета
@@ -199,16 +199,16 @@ def collect_wind():
     lat, lng = WIND_POINT
     now_local = datetime.now(ATYRAU_TZ).replace(tzinfo=None)
     url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lng}"
-           "&hourly=wind_direction_10m,wind_speed_10m,wind_gusts_10m,shortwave_radiation,cloud_cover"
+           "&hourly=wind_direction_10m,wind_speed_10m,wind_gusts_10m,shortwave_radiation,cloud_cover,temperature_2m"
            f"&wind_speed_unit=ms&timezone=Asia%2FAtyrau&start_date={WEATHER_START}&end_date={now_local:%Y-%m-%d}")
     h = get_json(url)["hourly"]
     rows = []
-    for t, d, s, g, rad, cl in zip(h["time"], h["wind_direction_10m"], h["wind_speed_10m"], h["wind_gusts_10m"],
-                                   h["shortwave_radiation"], h["cloud_cover"]):
+    for t, d, s, g, rad, cl, tc in zip(h["time"], h["wind_direction_10m"], h["wind_speed_10m"], h["wind_gusts_10m"],
+                                       h["shortwave_radiation"], h["cloud_cover"], h["temperature_2m"]):
         if datetime.fromisoformat(t) > now_local or d is None:
             continue  # только прошедшие часы, без прогноза
         rows.append({"time_local": t, "wind_dir_deg": d, "wind_speed_ms": s, "wind_gust_ms": g,
-                     "radiation_wm2": rad, "cloud_pct": cl})
+                     "radiation_wm2": rad, "cloud_pct": cl, "temp_c": tc})
     tmp = WIND_CSV.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=WIND_FIELDS)
