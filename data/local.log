@@ -123,3 +123,9 @@ error: Please commit or stash them.
 2026-10-16 19:10:11 посты: 28 точек, новых строк 103
 2026-10-16 19:10:15 github: отправлено
 2026-10-16 20:10:09 посты: 28 точек, новых строк 103
+2026-10-16 20:10:11 github: ОШИБКА pull: error: could not apply df3471d... Жинағыш: Open-Meteo температурасы (temp_c) wind.csv-ке
+hint: Resolve all conflicts manually, mark them as resolved with
+hint: "git add/rm <conflicted_files>", then run "git rebase --continue".
+hint: You can instead skip this commit: run "git rebase --skip".
+hint: To
+2026-10-16 21:10:09 посты: 28 точек, новых строк 102
