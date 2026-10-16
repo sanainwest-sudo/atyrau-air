@@ -158,11 +158,12 @@
       const Q = mm > 0 ? Math.max(0, em / mm) : 0;
       const resid = rows.reduce((a, o, i) => a + (o.excess - Q * m[i]) ** 2, 0);
       const explained = total > 0 ? Math.max(0, 1 - resid / total) : 0;
-      return { source: s, explained, Q };
+      // pred[i] — осы көз болса, rows[i] бекетінде болатын артық мән (мкг/м³), Q сәйкестендірілген
+      return { source: s, explained, Q, pred: m.map(v => Q * v) };
     });
     const sum = result.reduce((a, r) => a + r.explained, 0);
     result.forEach(r => r.share = sum > 0 ? r.explained / sum : 0);
-    return { ranking: result.sort((a, b) => b.explained - a.explained), total, n: rows.length };
+    return { ranking: result.sort((a, b) => b.explained - a.explained), total, n: rows.length, rows };
   }
 
   /** Көздің түтіні x метр қашықтықта қанша метрге көтерілетіні (бетте көрсету үшін). w — { speed, rad, cloud, temp, stationTemps } */

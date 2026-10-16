@@ -171,3 +171,17 @@ test('riseAt: stack жоқ көзге 0, бар көзге оң; бекет те
   const hotAir = { ...w, stationTemps: [{ lat: 47.0, lng: 52.01, temp: 30 }] };
   assert.ok(riseAt({ ...src, stack: STACK }, hotAir, 5000) < riseAt({ ...src, stack: STACK }, w, 5000));
 });
+
+test('rankSources: pred мен rows сәйкес; жасанды шығарындыда болжам нақты мәнге жақын', () => {
+  const src = SOURCES[2]; // тоған
+  const hours = evening(src);
+  const obs = synth(src, hours, 0);
+  const { ranking, rows, n } = rankSources(SOURCES, obs, hours);
+  const best = ranking[0];
+  assert.strictEqual(best.source.id, 'pond');
+  assert.strictEqual(best.pred.length, n);
+  assert.strictEqual(rows.length, n);
+  // ең көп артығы бар бекетте болжам да ең үлкендердің қатарында (нақты мәннің ±35% шегінде)
+  const i = rows.reduce((k, o, j) => (o.excess > rows[k].excess ? j : k), 0);
+  assert.ok(Math.abs(best.pred[i] - rows[i].excess) <= 0.35 * rows[i].excess + 1, `факт ${rows[i].excess}, модель ${best.pred[i]}`);
+});
