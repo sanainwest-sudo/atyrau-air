@@ -270,6 +270,18 @@ async function init() {
     hourSet.add(h);
   }
   for (const st of Object.values(stations)) for (const p in st.data) st.stale[p] = markStale(st.data[p]);
+  // Қаладан тыс бекеттердің атына ауыл (елді мекен) атын қосамыз: «ПНЗ №7 · Кульсары». Қала бекеттері мен ТШО өзгермейді.
+  const villageOf = address => {
+    const a = address || '';
+    const dam = a.match(/населенный пункт\s+([^,]+)/i); // «Атырау, населенный пункт Дамба, …»
+    if (dam) return dam[1].trim();
+    const first = a.split(',')[0].replace(/^(с|п|г)\.\s*/i, '').trim();
+    return first === 'Атырау' ? '' : first;
+  };
+  for (const st of Object.values(stations)) {
+    const v = villageOf(st.address);
+    if (v && !st.name.includes(v)) st.name += ' · ' + v;
+  }
   // аттас бекеттер (мысалы, «ПНЗ №1» — Жанбай және Мақат): атына елді мекенді қосамын
   const byName = {};
   for (const st of Object.values(stations)) (byName[st.name] ??= []).push(st);
