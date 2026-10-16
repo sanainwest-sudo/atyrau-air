@@ -28,6 +28,10 @@
   .wind { display: flex; gap: 12px; align-items: center; }
   .wind svg { flex: none; }
   .muted { color: var(--muted); font-size: 13px; }
+  .mvf { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  .mvf th, .mvf td { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+  .mvf th:first-child, .mvf td:first-child { text-align: left; }
+  .mvf th { color: var(--muted); font-weight: 600; }
   .legend { display: grid; gap: 4px; font-size: 13px; }
   .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
   h2 { font-size: 15px; margin: 0 0 8px; }
@@ -433,7 +437,7 @@ function renderAttribution() {
     $('#attr').innerHTML = `<div class="muted">Бұл кезеңде бекеттерде ${pollutant} фоннан айтарлықтай жоғары емес (артықшылық ${maxEx.toFixed(1)} мкг/м³ < ${MIN_EXCESS}). Көзді анықтауға негіз жоқ.</div>` + clsLine;
     return;
   }
-  const { ranking } = AirModel.rankSources(sources, obs, weather);
+  const { ranking, rows } = AirModel.rankSources(sources, obs, weather);
   const best = ranking[0];
   if (!best || best.explained < MIN_EXPLAINED) {
     $('#attr').innerHTML = `<div class="muted">Бекеттерде ${pollutant} фоннан сәл жоғары (ең көбі +${maxEx.toFixed(1)} мкг/м³), бірақ тізімдегі бірде-бір көз
@@ -446,12 +450,33 @@ function renderAttribution() {
         <div class="track"><div class="fill" style="width:${(r.share * 100).toFixed(0)}%"></div></div></div>
         <b>${(r.share * 100).toFixed(0)}%</b></div>`).join('')
     + `<div class="muted" style="margin-top:6px">Ең жақсы көз артық ${pollutant}-тің ${(best.explained * 100).toFixed(0)}%-ын түсіндіреді.
-       Бұл — ықтималдық, кінәліні дәлелдеу емес.</div>` + travelLine(best.source, obs, w) + clsLine;
+       Бұл — ықтималдық, кінәліні дәлелдеу емес.</div>` + travelLine(best.source, obs, w) + modelVsFact(best, rows) + clsLine;
   if (best && best.share > 0 && w && cls) {
     L.polygon(AirModel.plumeOutline(best.source, w.dir, cls), { color: '#b45309', weight: 1, fillOpacity: 0.15, interactive: false }).addTo(plumeLayer);
   }
 }
 $('#attrWindow').onchange = renderAttribution;
+
+/* «Модель vs факт»: ең жақсы көз болса, әр бекетте қанша артық мән болар еді және шын мәнінде қанша.
+   Кезең (1/3/6/12 сағ) бойынша бекеттің орташасы; мәндер мкг/м³ (фоннан артығы). Сәйкес: айырма ≤ max(1, 0,35·үлкені). */
+function modelVsFact(best, rows) {
+  const by = new Map();
+  rows.forEach((o, i) => {
+    const e = by.get(o.station) ?? { s: o.station, f: 0, m: 0, n: 0 };
+    e.f += o.excess; e.m += best.pred[i]; e.n++;
+    by.set(o.station, e);
+  });
+  const list = [...by.values()].map(e => ({ s: e.s, f: e.f / e.n, m: e.m / e.n }))
+    .filter(e => Math.max(e.f, e.m) >= 0.5)
+    .sort((a, b) => Math.max(b.f, b.m) - Math.max(a.f, a.m)).slice(0, 8);
+  if (!list.length) return '';
+  const verdict = e => Math.abs(e.f - e.m) <= Math.max(1, 0.35 * Math.max(e.f, e.m)) ? '✓ сәйкес' : e.m > e.f ? 'модель артық' : 'модель кем';
+  const ok = list.filter(e => verdict(e) === '✓ сәйкес').length;
+  return `<div style="margin-top:8px"><b>Модель vs факт</b> <span class="muted">— ${esc(best.source.name)}, бекет бойынша кезең орташасы</span>
+    <table class="mvf"><tr><th>Бекет</th><th>Факт</th><th>Модель</th><th>Сәйкестік</th></tr>
+    ${list.map(e => `<tr><td>${esc(e.s.name)}</td><td>${e.f.toFixed(1)}</td><td>${e.m.toFixed(1)}</td><td>${verdict(e)}</td></tr>`).join('')}</table>
+    <div class="muted">${ok}/${list.length} бекетте сәйкес. Мәндер — мкг/м³, фоннан артығы.</div></div>`;
+}
 
 /* Жету уақыты: көзден (тоған болса — ең жақын нүктесінен) бекетке дейінгі қашықтық / жел жылдамдығы.
    Қарапайым баға: ауа желмен бірге түзу жүреді деп есептейміз. */
